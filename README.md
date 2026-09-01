@@ -18,7 +18,7 @@ lands on the forks, then this workspace pins those commits:
 
 - Stages 0–3 done. Int8 graph **imports and runs**. Tokenizer matches HF.
 - Int8 cosine vs ort ≈ **0.996** (expected cross-engine int8 divergence; FP32 model-check is 1e-4 exact).
-- Flex backend is **19–45× slower** than ort VNNI. That is stage 4.
+- Flex backend is **19–45× slower** than ort VNNI on the Intel Mac that wrote `ref_data.json`; on a VNNI/AMX Linux box the same flex binary is **~20–30× vs that Mac baseline** and **~40–80× vs local ort**. Analysis: [notes/verify-burn-vs-ort.md](notes/verify-burn-vs-ort.md). That is stage 4.
 - 4096-token-budget peak RSS 640 MB (over 512 MB); 2048-token budget fits at 416 MB.
 
 Details: [notes/poc-results.md](notes/poc-results.md).

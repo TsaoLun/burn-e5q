@@ -119,7 +119,7 @@ cargo run --release -p e5-embed --features cpu --no-default-features --bin mem_s
 
 XLM-RoBERTa-small，int8 ONNX，96 个整数 matmul，大致两类：
 
-- Attention：`[B*heads, seq, head_dim=64]` × `[B*heads, 64, seq]`
+- Attention：`[B*heads, seq, head_dim=32]` × `[B*heads, 32, seq]`（e5-small 是 12 heads × 32；不是 64）
 - FFN：`[B, seq, 384] × [384, 1536]` 与 `[B, seq, 1536] × [1536, 384]`
 
 DQL 输出 **U8** + 标量 scale/zp。Zero-point 在 MatMulInteger 的可选输入上。

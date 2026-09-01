@@ -52,6 +52,8 @@ Work order (details in `notes/stage-4.md`):
 4. **Re-bench** — `cargo run --release -p e5-embed --features cpu --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
+   Linux re-bench of the *current* flex gap: `notes/verify-burn-vs-ort.md`.
+   `--features cpu` does not compile until cubek and burn share one cubecl rev.
 
 ## How to run the PoC
 

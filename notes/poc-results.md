@@ -74,6 +74,10 @@ cargo run --release -p e5-embed --bin diagnose
 cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 ```
 
+## Linux 复测（2026-09-01）
+
+同一套 flex `compare_ort` 在 4 核 Xeon（`avx512_vnni` + `amx_int8`）上重跑：短文本 130 ms、512 tok 3.82 s，相对 `ref_data.json` 的 Mac ort 仍是 **19–30×**。本机 Python ort 1.29 把 512 tok 打到 50 ms，倍数变成 **~77×**——ort 吃到了 VNNI/AMX，flex 没有。完整分析见 `notes/verify-burn-vs-ort.md`。
+
 ## 下一步（按优先级）
 
 1. **阶段 4**（`notes/stage-4.md`）：在 [TsaoLun/cubek](https://github.com/TsaoLun/cubek) 做 i8 GEMM，经本仓库 `[patch]` 接入 `e5-embed --features cpu`。
