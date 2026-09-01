@@ -2,3 +2,7 @@ target/
 **/*.onnx
 !crates/dql-poc/models/*.onnx
 crates/e5-embed/models/*.onnx
+crates/e5-embed/models/sentencepiece.bpe.model
+crates/e5-embed/models/tokenizer.json
+crates/e5-embed/models/tokenizer_config.json
+crates/e5-embed/models/config.json
