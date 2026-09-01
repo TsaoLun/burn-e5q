@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "../burn"
+		},
+		{
+			"path": "../burn-onnx"
+		},
+		{
+			"path": "../cubecl"
+		},
+		{
+			"path": "../cubek"
+		},
+		{
+			"path": "../inmotion-social"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}

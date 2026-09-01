@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Same burn rev as TsaoLun/burn-onnx (add-dynamic-quantize-linear).
+burn = { git = "https://github.com/tracel-ai/burn", default-features = false, rev = "af844911be6efb6745301c1c2c5e695d6571b316" }
+burn-store = { git = "https://github.com/tracel-ai/burn", default-features = false, rev = "af844911be6efb6745301c1c2c5e695d6571b316", features = ["std"] }
+
+# DQL + graph.rs clone-tracking fix. Update `rev` after pushing to this branch.
+burn-onnx = { git = "https://github.com/TsaoLun/burn-onnx", default-features = false, rev = "63e35840812fe573608d7152868f2c1972494887" }
+onnx-ir = { git = "https://github.com/TsaoLun/burn-onnx", default-features = false, rev = "63e35840812fe573608d7152868f2c1972494887" }
+
+# Fork of cubek used by burn-cpu (via [patch] below). Same commit as tracel-ai/cubek
+# at the burn pin above; bump this rev after pushing i8 GEMM work.
+cubek = { git = "https://github.com/TsaoLun/cubek", default-features = false, rev = "c1a1a9eb5e655d8728d92e61b8a44ce0794d9afb" }
+
+# Redirect burn's `git = "https://github.com/tracel-ai/cubek"` to the fork so
+# `burn/cpu` picks up kernel work without forking burn itself.
+#
+# After pushing to TsaoLun/cubek, bump BOTH this `rev` and workspace.dependencies.cubek.
+[patch."https://github.com/tracel-ai/cubek"]
+cubek = { git = "https://github.com/TsaoLun/cubek", rev = "c1a1a9eb5e655d8728d92e61b8a44ce0794d9afb" }
+
+# Local overlay for a sibling cubek checkout (uncomment while iterating on kernels;
+# comment out the git patch block above — Cargo allows only one patch table per source):
+# [patch."https://github.com/tracel-ai/cubek"]
+# cubek = { path = "../cubek/crates/cubek" }

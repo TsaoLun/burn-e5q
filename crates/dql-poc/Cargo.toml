@@ -1,0 +1,17 @@
+[package]
+name = "dql-poc"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[features]
+default = ["flex"]
+flex = ["burn/flex", "burn/store"]
+cpu = ["burn/cpu", "burn/store"]
+
+[dependencies]
+burn = { workspace = true }
+burn-store = { workspace = true }
+
+[build-dependencies]
+burn-onnx = { workspace = true, features = ["default"] }

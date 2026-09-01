@@ -1,0 +1,4 @@
+target/
+**/*.onnx
+!crates/dql-poc/models/*.onnx
+crates/e5-embed/models/*.onnx
