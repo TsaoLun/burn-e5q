@@ -20,12 +20,13 @@
 - `launch_matmul` 修了 rhs 被标成 `lhs.dtype` 的 bug（否则 u8×i8 错）。
 - flex：`u8/i8`（含混合）先 `int_cast(I32)` 再走现有 i32 GEMM。单测 `u8×i8` / `u8×u8` 过。
 
-### 3. burn-onnx `vendor/burn-onnx-keep-int8-matmul` (`39a7d6ff`)
+### 3. burn-onnx `vendor/burn-onnx-keep-int8-matmul` (`b88643ea`)
 
 - MatMulInteger **不再** `cast(I32)` 再 `.matmul()`。
 - zp 用代数恒等式，乘加仍在 I32：
   `(A-za)@(B-zb) = A@B − za·sum_k(B) − sum_k(A)·zb + za·zb·K`
-- insta 10/10 过（含新的 u8×i8 锁测试）。
+- 每个 lhs/rhs/zp 的消耗性使用都 `.clone()`，否则 96 个带 zp 的节点会 use-after-move。
+- insta 11/11 过（含 u8×i8 锁测试 + e5 式 3d×2d+zp）。
 
 ### 4. cubecl `vendor/cubecl-host-native-jit` (`a62bcd86`)
 

@@ -709,7 +709,7 @@ dependencies = [
 [[package]]
 name = "burn-onnx"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=39a7d6ff298799027bf07a75f47f9d4c029b0430#39a7d6ff298799027bf07a75f47f9d4c029b0430"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=b88643ea7018557b38b511544f9933b4c2e5f98b#b88643ea7018557b38b511544f9933b4c2e5f98b"
 dependencies = [
  "burn",
  "burn-pack",
@@ -3884,7 +3884,7 @@ checksum = "cfe21416a02c693fb9f980befcb230ecc70b0b3d1cc4abf88b9675c4c1457f0c"
 [[package]]
 name = "onnx-ir"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=39a7d6ff298799027bf07a75f47f9d4c029b0430#39a7d6ff298799027bf07a75f47f9d4c029b0430"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=b88643ea7018557b38b511544f9933b4c2e5f98b#b88643ea7018557b38b511544f9933b4c2e5f98b"
 dependencies = [
  "burn-tensor",
  "bytemuck",
@@ -3904,7 +3904,7 @@ dependencies = [
 [[package]]
 name = "onnx-ir-derive"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=39a7d6ff298799027bf07a75f47f9d4c029b0430#39a7d6ff298799027bf07a75f47f9d4c029b0430"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=b88643ea7018557b38b511544f9933b4c2e5f98b#b88643ea7018557b38b511544f9933b4c2e5f98b"
 dependencies = [
  "proc-macro2",
  "quote",
