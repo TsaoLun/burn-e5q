@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.lock"
+      - "**.rs"
+      - "**.yml"
+      - "**.toml"
+      - "!**.md"
+      - "!LICENSE-APACHE"
+      - "!LICENSE-MIT"
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - "Cargo.lock"
+      - "**.rs"
+      - "**.yml"
+      - "**.toml"
+      - "!**.md"
+      - "!LICENSE-APACHE"
+      - "!LICENSE-MIT"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_PREVIOUS_VERSION: 1.95.0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-checks:
+    runs-on: ubuntu-24.04
+    outputs:
+      rust-prev-version: ${{ env.RUST_PREVIOUS_VERSION }}
+    steps:
+      - name: Do Nothing
+        if: false
+        run: echo
+
+  code-quality:
+    runs-on: ubuntu-24.04
+    needs: prepare-checks
+    strategy:
+      matrix:
+        rust: [stable]
+        include:
+          - rust: stable
+            toolchain: stable
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ${{ matrix.rust }}-linux
+      # --------------------------------------------------------------------------------
+      - name: Format
+        shell: bash
+        env:
+          # work around for colors
+          # see: https://github.com/rust-lang/rustfmt/issues/3385
+          TERM: xterm-256color
+        run: cargo xtask check format
+      # --------------------------------------------------------------------------------
+      - name: Lint
+        run: cargo xtask check lint
+      # --------------------------------------------------------------------------------
+      # The test job only runs the light tier, so nothing else ever compiles the
+      # `extended` tests.
+      - name: Lint extended tests
+        run: cargo clippy --tests --features extended -- -D warnings
+      # --------------------------------------------------------------------------------
+      # Every other job compiles both of cubek-matmul's architectures, so nothing else
+      # would notice a `#[cfg]` that stopped being true. These two build each
+      # architecture without the other, tests included.
+      - name: Lint matmul on tiled alone
+        run: cargo clippy -p cubek-matmul --no-default-features --features std,tiled,extended,cubecl/cpu --tests -- -D warnings
+      # --------------------------------------------------------------------------------
+      - name: Lint matmul on multi-level alone
+        run: cargo clippy -p cubek-matmul --no-default-features --features std,multi-level,extended,cubecl/cpu --tests -- -D warnings
+      # --------------------------------------------------------------------------------
+      - name: Typos
+        uses: tracel-ai/github-actions/check-typos@v11
+
+  documentation:
+    runs-on: ubuntu-24.04
+    needs: prepare-checks
+    strategy:
+      matrix:
+        rust: [stable]
+        include:
+          - rust: stable
+            toolchain: stable
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ${{ matrix.rust }}-linux
+      # --------------------------------------------------------------------------------
+      - name: Documentation Build
+        run: cargo xtask doc build
+      # --------------------------------------------------------------------------------
+      - name: Documentation Tests
+        run: cargo xtask doc tests
+
+  linux-std-tests:
+    runs-on: ubuntu-24.04
+    needs: [prepare-checks, code-quality]
+    strategy:
+      matrix:
+        rust: [stable, prev]
+        include:
+          - rust: stable
+            toolchain: stable
+          - rust: prev
+            toolchain: ${{ needs.prepare-checks.outputs.rust-prev-version }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ${{ matrix.rust }}-linux
+          apt-packages: build-essential
+      # --------------------------------------------------------------------------------
+      - name: Install Mesa
+        uses: tracel-ai/github-actions/install-mesa@v11
+      # --------------------------------------------------------------------------------
+      - name: Install Vulkan SDK
+        uses: tracel-ai/github-actions/install-vulkan-sdk@v11
+      # --------------------------------------------------------------------------------
+      - name: Tests
+        run: cargo xtask test --ci

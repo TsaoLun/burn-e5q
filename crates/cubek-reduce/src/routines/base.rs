@@ -1,0 +1,61 @@
+use crate::{
+    ReduceDtypes, ReduceError, VectorizationMode, components::instructions::ReduceOperationConfig,
+    routines::ReduceBlueprint,
+};
+use cubecl::prelude::*;
+
+#[derive(Debug)]
+pub struct ReduceVectorSettings {
+    pub vectorization_mode: VectorizationMode,
+    pub vector_size_input: VectorSize,
+    pub vector_size_output: VectorSize,
+    /// See [`ReduceStrategy::autotune_level`](crate::ReduceStrategy): gates
+    /// the unchecked comptime fast paths in the blueprint derivations.
+    pub unchecked_fast_paths: bool,
+    /// Whether reading the input has side effects (fuse-on-read: the read also
+    /// writes a materialized intermediate).
+    pub fuse_on_read: bool,
+}
+
+#[derive(Debug)]
+pub struct ReduceLaunchSettings {
+    pub cube_dim: CubeDim,
+    pub cube_count: CubeCount,
+    pub address_type: AddressType,
+    pub vector: ReduceVectorSettings,
+}
+
+#[derive(Debug)]
+pub struct ReduceProblem {
+    /// Number of elements in reduce axis
+    pub reduce_len: usize,
+    /// Number of instances of the reduce axis
+    pub reduce_count: usize,
+    pub axis: usize,
+    pub dtypes: ReduceDtypes,
+    /// The reduce operation being launched. The blueprint selector bounds the cube
+    /// width by this instruction's per-accumulator shared-memory footprint (which
+    /// scales with `k` for `ArgTopK` / `TopK`).
+    pub instruction: ReduceOperationConfig,
+    /// The address type, defined by the max of each handle's `required_address_type`
+    pub address_type: AddressType,
+}
+
+#[derive(Debug, Clone)]
+pub enum BlueprintStrategy<R: Routine> {
+    Forced(R::Blueprint, CubeDim),
+    Inferred(R::Strategy),
+}
+
+pub trait Routine: core::fmt::Debug + Clone + Sized {
+    type Strategy: core::fmt::Debug + Clone + Send + 'static;
+    type Blueprint: core::fmt::Debug + Clone + Send + 'static;
+
+    fn prepare<R: Runtime>(
+        &self,
+        client: &ComputeClient<R>,
+        problem: ReduceProblem,
+        settings: ReduceVectorSettings,
+        strategy: BlueprintStrategy<Self>,
+    ) -> Result<(ReduceBlueprint, ReduceLaunchSettings), ReduceError>;
+}

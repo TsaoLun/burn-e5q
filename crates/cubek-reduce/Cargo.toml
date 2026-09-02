@@ -1,0 +1,46 @@
+[package]
+authors = [
+    "nathanielsimard <nathaniel.simard.42@gmail.com>",
+    "louisfd <louisfd94@gmail.com>",
+    "maxtremblay <t.maxime@pm.me>",
+]
+categories = ["science", "mathematics", "algorithms"]
+description = "CubeK: Reduce Kernels"
+edition.workspace = true
+keywords = []
+license.workspace = true
+name = "cubek-reduce"
+readme.workspace = true
+repository = "https://github.com/tracel-ai/cubek/tree/main/crates/cubek-reduce"
+version.workspace = true
+
+[features]
+default = ["std", "cubecl/default"]
+std = ["cubecl/std", "thiserror/std"]
+
+heavy = []
+extended = ["heavy"]
+full = ["extended", "benchmarks"]
+
+cpu-reference = ["dep:cubek-test-utils"]
+# Enables `pub mod benchmarks` — catalogue of reduce benchmark problems /
+# strategies and the bench harness. The seeded `ReduceCorrectness` impl
+# inside that module is additionally gated on `cpu-reference`.
+benchmarks = ["cpu-reference", "cubecl/test-runtime"]
+
+[dependencies]
+cubecl = { workspace = true }
+cubek-std = { path = "../cubek-std", version = "=0.3.0-pre.3", default-features = false }
+cubek-test-utils = { path = "./../cubek-test-utils/", version = "=0.3.0-pre.3", default-features = false, optional = true }
+
+num-traits = "0.2.19"
+pretty_assertions = { workspace = true, optional = true }
+serde = { workspace = true }
+half = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+cubecl = { workspace = true, features = ["test-runtime"] }
+cubecl-common = { workspace = true }
+cubek-reduce = { path = ".", features = ["cpu-reference"] }
+cubek-test-utils = { path = "./../cubek-test-utils/", version = "=0.3.0-pre.3" }

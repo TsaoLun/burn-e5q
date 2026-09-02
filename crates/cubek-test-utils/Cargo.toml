@@ -1,0 +1,35 @@
+[package]
+authors = [
+    "nathanielsimard <nathaniel.simard.42@gmail.com>",
+    "louisfd <louisfd94@gmail.com>",
+]
+description = "CubeK: Test Utils"
+edition.workspace = true
+license.workspace = true
+name = "cubek-test-utils"
+readme.workspace = true
+rust-version.workspace = true
+repository = "https://github.com/tracel-ai/cubek/tree/main/crates/cubek-test-utils"
+version.workspace = true
+
+[features]
+default = ["cubecl/default"]
+std = ["cubecl/std"]
+
+heavy = []
+extended = ["heavy"]
+full = ["extended"]
+
+[dependencies]
+cubek-tile = { path = "../cubek-tile", version = "=0.3.0-pre.3", default-features = false }
+
+bytemuck = { workspace = true }
+cubecl = { workspace = true, features = ["stdlib", "test-runtime"] }
+cubecl-common = { workspace = true, features = ["fp8"] }
+half = { workspace = true, features = ["bytemuck"] }
+serde = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+trybuild = "1"

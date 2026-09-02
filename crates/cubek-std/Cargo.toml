@@ -1,0 +1,35 @@
+[package]
+authors = ["louisfd <louisfd94@gmail.com>"]
+description = "CubeK: Standard Library"
+edition.workspace = true
+license.workspace = true
+name = "cubek-std"
+readme.workspace = true
+rust-version.workspace = true
+repository = "https://github.com/tracel-ai/cubek/tree/main/crates/cubek-std"
+version.workspace = true
+
+[features]
+default = ["cubecl/default"]
+std = ["cubecl/std"]
+
+heavy = []
+extended = ["heavy"]
+full = ["extended"]
+
+# Pulls in `cubek-test-utils` for test/bench-only conversions (e.g.
+# `MatrixLayout` → `LayoutSpec`). Off by default.
+testing = ["dep:cubek-test-utils", "cubecl/test-runtime"]
+
+# Enables `pub mod benchmarks` — catalogues for the contiguous, unary, and
+# memcpy_async subcategories. Off by default; the top-level `benchmarks`
+# crate turns it on.
+benchmarks = ["testing"]
+
+[dependencies]
+cubecl = { workspace = true, features = ["stdlib"] }
+cubecl-common = { workspace = true }
+cubek-test-utils = { path = "../cubek-test-utils", version = "=0.3.0-pre.3", default-features = false, optional = true }
+
+[dev-dependencies]
+cubek-test-utils = { path = "../cubek-test-utils", version = "=0.3.0-pre.3", default-features = false }
