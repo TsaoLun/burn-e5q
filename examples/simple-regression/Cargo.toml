@@ -1,0 +1,29 @@
+[package]
+authors = ["aasheeshsingh <aasheeshdtu@gmail.com>"]
+edition.workspace = true
+license.workspace = true
+name = "simple-regression"
+publish = false
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["burn/dataset", "burn/sqlite-bundled"]
+flex = ["burn/flex"]
+tch-cpu = ["burn/tch"]
+tch-gpu = ["burn/tch"]
+wgpu = ["burn/wgpu"]
+remote = ["burn/remote"]
+
+[dependencies]
+burn = { workspace = true, features = ["default", "train"] }
+
+# Serialization
+log = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+
+# Displaying results
+textplots = "0.8.7"
+rgb = "0.8.52"

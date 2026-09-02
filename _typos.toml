@@ -1,0 +1,27 @@
+[default]
+extend-ignore-identifiers-re = ["ratatui", "Ratatui", "NdArray*", "ND", "log_lik", ".*ue4m3.*", ".*ue8m0.*"]
+
+[default.extend-identifiers]
+UE4M3 = "UE4M3"
+UE8M0 = "UE8M0"
+ue8m0 = "ue8m0"
+
+[files]
+extend-exclude = [
+    "*.onnx",
+    "*.proto",
+    "assets/ModuleSerialization.xml",
+    "*.map", # linker map files
+]
+
+[default.extend-words]
+# Don't correct "nd" (n-dimensional, as in scatter_nd/gather_nd)
+nd = "nd"
+# Don't correct "arange" which is intentional
+arange = "arange"
+# Don't correct "convnet" (convolutional network)
+convnet = "convnet"
+# Don't correct "Nd" in convNd / conv_nd (N-dimensional)
+Nd = "Nd"
+# Don't correct "mis" from a hyphenated prefix (mis-oriented, mis-chosen)
+mis = "mis"

@@ -1,0 +1,129 @@
+# Backend Extension
+
+Burn aims to be the most flexible deep learning framework. While it's crucial to maintain
+compatibility with a wide variety of backends, Burn provides the ability to extend the functionality
+of a backend implementation to suit your modeling requirements. This versatility is advantageous in
+numerous ways, such as supporting custom operations like flash attention or manually fusing
+operations for enhanced performance.
+
+In this section, we will go into the process of extending a backend, providing multiple examples.
+But before we proceed, let's establish the fundamental principles that will empower you to craft
+your own backend extensions.
+
+Burn's user-facing tensors and modules are runtime-dispatched and don't expose a backend generic.
+Backend traits remain part of the lower layer, where they define primitive operations that can
+be registered with the Tensor → Bridge → Dispatch → Backend stack. To create an extension, define a
+backend trait specifying the new primitive operation, implement it for the backends you support,
+and expose a backend-independent `Tensor` function that calls through `Dispatch`.
+
+```rust, ignore
+pub trait Backend: burn::backend::Backend {
+    fn my_new_function(tensor: FloatTensor<Self>) -> FloatTensor<Self> {
+        // You can define a basic implementation reusing the Burn Backend API.
+        // This can be useful since all backends will now automatically support
+        // your model. But performance can be improved for this new
+        // operation by implementing this block in specific backends.
+    }
+}
+```
+
+You can then implement your new custom backend trait for any backend that you want to support:
+
+```rust, ignore
+impl Backend for burn_wgpu::Wgpu {
+   fn my_new_function(tensor: FloatTensor<Self>) -> FloatTensor<Self> {
+      // My wgpu implementation
+   }
+}
+
+impl Backend for burn_flex::Flex {
+    // No specific implementation, but the backend can still be used.
+}
+```
+
+You can support the backward pass using the same pattern.
+
+```rust, ignore
+impl<B: Backend> Backend for burn_autodiff::Autodiff<B> {
+    // No specific implementation; autodiff will work with the default
+    // implementation. Useful if you still want to train your model, but
+    // observe performance gains mostly during inference.
+}
+
+impl<B: Backend> Backend for burn_autodiff::Autodiff<B> {
+   fn my_new_function(tensor: AutodiffTensor) -> AutodiffTensor {
+      // My own backward implementation, generic over my custom Backend trait.
+      //
+      // You can add a new method `my_new_function_backward` to your custom backend
+      // trait if you want to invoke a custom kernel during the backward pass.
+   }
+}
+
+impl Backend for burn_autodiff::Autodiff<burn_wgpu::Wgpu> {
+   fn my_new_function(tensor: AutodiffTensor) -> AutodiffTensor {
+      // My own backward implementation, generic over a backend implementation.
+      //
+      // This is another way to call a custom kernel for the backward pass that
+      // doesn't require the addition of a new `backward` function in the custom backend.
+      // This is useful if you don't want all backends to support training, reducing
+      // the need for extra code when you know your model will only be trained on one
+      // specific backend.
+   }
+}
+```
+
+The specifics of each implementation will be covered by the examples provided in this section. The
+`cubecl` compiler frontend is the recommended method of implementing custom kernels, since it
+supports multiple backends, including `wgpu` and `CUDA`, and is the way first-party `burn` kernels
+are written.
+
+## Passing structs and enums of tensors
+
+An extension operation is not limited to individual tensor arguments. A custom struct or enum whose
+fields are tensor primitives can be passed to and returned from an operation by deriving
+`ExtensionType`. Fields that are not tensors pass through unchanged, and a field that is itself an
+`ExtensionType` can be nested by annotating it with `#[extension_type]`.
+
+```rust, ignore
+use burn::backend::{
+    ExtensionType, backend_extension,
+    tensor::{FloatTensor, IntTensor},
+};
+
+#[derive(ExtensionType)]
+pub struct Boxes<B: Backend> {
+    pub coords: FloatTensor<B>,
+    pub scores: FloatTensor<B>,
+    pub count: usize, // Non-tensor fields pass through unchanged.
+}
+
+#[derive(ExtensionType)]
+pub enum Operand<B: Backend> {
+    Dense(FloatTensor<B>),
+    Sparse { values: FloatTensor<B>, indices: IntTensor<B> },
+    Empty,
+}
+```
+
+Such a type can be returned from an operation directly. To pass one as an input, mark the argument
+with `#[extension_type]`:
+
+```rust, ignore
+#[backend_extension(Wgpu, Cuda, Autodiff)]
+pub trait Backend: burn::backend::Backend {
+    // Struct as an output.
+    fn detect(image: FloatTensor<Self>) -> Boxes<Self>;
+
+    // Struct or enum as an input.
+    fn nms(#[extension_type] boxes: Boxes<Self>, iou_threshold: f32) -> Boxes<Self>;
+}
+```
+
+Inputs marked this way can be freely mixed with plain tensor arguments and with each other, and an
+operation can take several of them. The backend is selected by looking at a representative tensor
+across the inputs, so an enum currently on a variant that holds no tensor simply defers to the next
+input; if no input holds a tensor at all, the backend cannot be resolved and the operation panics.
+
+Struct and enum inputs also work with `Autodiff`. Float fields carry the gradient; other fields do
+not. Your `impl ... for Autodiff<B>` writes the backward pass by hand, exactly as it does for plain
+tensor inputs.

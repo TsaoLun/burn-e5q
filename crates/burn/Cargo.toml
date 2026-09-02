@@ -1,0 +1,149 @@
+[package]
+authors = ["nathanielsimard <nathaniel.simard.42@gmail.com>"]
+categories = ["science", "no-std", "embedded", "wasm"]
+description = "Flexible and Comprehensive Deep Learning Framework in Rust"
+documentation = "https://docs.rs/burn"
+edition.workspace = true
+keywords = [
+    "deep-learning",
+    "machine-learning",
+    "tensor",
+    "pytorch",
+    "autodiff",
+]
+license.workspace = true
+name = "burn"
+readme.workspace = true
+repository = "https://github.com/tracel-ai/burn"
+rust-version = "1.95"
+version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = [
+    "rl",
+    "std",
+    "optim",
+    "burn-core/default",
+    "burn-train?/default",
+    "burn-nn/default",
+    "burn-optim?/default",
+    "burn-vision?/default",
+]
+doc = [
+    "default",
+    "train",
+    "burn-core/doc",
+    "burn-train/doc",
+    "burn-store?/std",
+    "burn-nn/doc",
+    "burn-optim?/doc",
+]
+std = [
+    "burn-core/std",
+    "burn-store?/std",
+    "burn-nn/std",
+    "burn-optim?/std",
+]
+tracing = [
+    "cubecl?/tracing",
+    "burn-core/tracing",
+    "burn-vision?/tracing",
+    "burn-nn/tracing",
+    "burn-optim?/tracing",
+]
+
+
+network = ["burn-core/network"]
+
+# Training with full features
+train = ["burn-train", "optim", "dataset"]
+
+## Includes the Text UI (progress bars, metric plots)
+tui = ["burn-train?/tui"]
+
+##  Includes system info metrics (CPU/GPU usage, etc)
+metrics = ["burn-train?/sys-metrics"]
+
+# Datasets
+dataset = ["burn-core/dataset"]
+
+sqlite = ["burn-core/sqlite"]
+sqlite-bundled = ["burn-core/sqlite-bundled"]
+
+# Model storage and serialization (SafeTensors, PyTorch interop)
+store = ["burn-store"]
+
+# Enable safetensors in burn-store.
+safetensors = ["store", "burn-store?/safetensors"]
+# Enable pytorch in burn-store.
+pytorch = ["store", "burn-store?/pytorch"]
+
+# CubeCL re-export
+cubecl = ["dep:cubecl"]
+
+audio = ["burn-core/audio"]
+vision = ["burn-core/vision", "burn-vision"]
+rl = ["dep:burn-rl", "burn-train?/rl"]
+
+# Optimizer
+optim = ["burn-optim", "autodiff"]
+
+# Backend
+ir = ["burn-core/ir"]
+autodiff = ["burn-core/autodiff"]
+fusion = ["ir", "burn-core/fusion", "burn-vision?/fusion"]
+
+## Backend features
+accelerate = ["burn-core/accelerate"]
+autotune = ["burn-core/autotune"]
+autotune-checks = ["burn-core/autotune-checks"]
+blas-netlib = ["burn-core/blas-netlib"]
+openblas = ["burn-core/openblas"]
+openblas-system = ["burn-core/openblas-system"]
+simd = ["burn-core/simd"]
+rayon = ["burn-core/rayon"]
+
+# Opt-in CPU codegen paths.
+x86-v4 = ["burn-core/x86-v4"]
+apple-amx = ["burn-core/apple-amx"]
+
+template = ["burn-core/template"]
+remote = ["burn-core/remote"]
+remote-server = ["burn-core/remote-server"]
+remote-websocket = ["burn-core/remote-websocket"]
+
+cuda = ["burn-core/cuda", "burn-vision?/cuda"]
+rocm = ["burn-core/rocm", "burn-vision?/rocm"]
+flex = ["burn-core/flex", "burn-vision?/flex"]
+ndarray = ["burn-core/ndarray"]
+tch = ["burn-core/tch", "burn-vision?/tch"]
+vulkan = ["wgpu", "burn-core/vulkan", "burn-vision?/vulkan"]
+webgpu = ["wgpu", "burn-core/webgpu", "burn-vision?/webgpu"]
+metal = ["wgpu", "burn-core/metal", "burn-vision?/metal"]
+wgpu = ["burn-core/wgpu", "burn-vision?/wgpu"]
+cpu = ["burn-core/cpu", "burn-vision?/cpu"]
+
+# Backend extensions
+extension = ["burn-core/extension"]
+capture = ["burn-core/capture"]
+
+[dependencies]
+
+# ** Please make sure all dependencies support no_std when std is disabled **
+
+burn-core = { workspace = true }
+burn-train = { workspace = true, optional = true }
+burn-store = { workspace = true, optional = true }
+burn-nn = { workspace = true }
+burn-optim = { workspace = true, optional = true }
+burn-rl = { workspace = true, optional = true }
+burn-vision = { workspace = true, optional = true }
+burn-std = { workspace = true }
+
+# Backends are pulled in through the dispatch chain
+# (burn-core -> burn-tensor -> burn-dispatch), not from here.
+
+cubecl = { workspace = true, optional = true }
