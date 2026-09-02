@@ -76,7 +76,7 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 下一步（按优先级）
 
-1. **flex VNNI + 融合 zp**（`notes/flex-vnni.md`）：`vpdpbusd` + `matmul_integer` 已接线。对拍数字待 `compare_ort`。
+1. **flex VNNI + 融合 zp**（`notes/flex-vnni.md`）：短 33 ms / 512 tok 1.46 s。再往下是 DQL，不是 GEMM。
 2. **flex 分块**（`notes/flex-accel.md`）：SSE2 下 130→76 ms / 3.82→2.80 s。被 native+VNNI 取代为默认路径。
 3. **阶段 4 cubecl**：短文本仍被 launch 卡住；叶子还不是手写 VNNI。
 4. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
@@ -187,4 +187,34 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 > 命令：`cargo run --release -p e5-embed --bin compare_ort`
 > 实现：`notes/flex-vnni.md`。
 
-对拍数字待跑完 `compare_ort` 后写入。
+## TL;DR
+
+| 维度 | 结果 | 判定 |
+|---|---|---|
+| 数值 | min cos 0.9935，mean **0.9960** | ✅ 与分块 flex 一致 |
+| 检索 | top-1 2/2；top-3 严格顺序 0/2 | ⚠️ 同前 |
+| 短文本 | **33.2 ms**（分块 75.7 → **2.3×**；朴素 130 → **3.9×**） | ✅ |
+| 512 tok | **1458 ms**（分块 2.80 s → **1.9×**） | ✅ 贴近非 GEMM 下限 |
+| vs Mac ort | 短 **7.7×**，512 **7.3×**（分块时 18× / 14×） | 仍未达 ~2× |
+| vs 本机 AMX ort | 短 ~10×，512 ~29× | DQL / 非 GEMM 为主 |
+| 内存 | 加载 88 MB；`mem_stress 2048` **215 MB** | ✅ |
+
+生成代码已是 `.matmul_integer(...)`，不再对每个 MatMulInteger 展开 `sum_dim`。
+
+## 延迟明细
+
+| 场景 | 朴素 flex | 分块 flex | **VNNI+zp** | cubecl-cpu | Mac ort | 本机 ort |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 tok | 130 ms | 75.7 ms | **33.2 ms** | 1936 ms | 4.3 ms | 3.4 ms |
+| 8 条 batch | 26.2 s | 18.1 s | **8.73 s** | 7.2 s | 1.41 s | 0.53 s |
+| 512 tok | 3.82 s | 2.80 s | **1.46 s** | 3.20 s | 201 ms | 50 ms |
+
+`mem_stress -- 5 2048`：4×512 稳态 **~6.4 s**（分块 11.7 s），峰值 215 MB。
+
+## 还剩什么
+
+512 tok 的 1.46 s 已经靠近「96 个 DQL + LN + clone」的固定开销。再抠 GEMM 收益很小。下一步若还要靠近 ort：
+
+1. 把 DQL 融进 GEMM（或至少别对每个激活做完整 min/max/round 图）
+2. 权重侧 AMX / 预打包 VNNI B 面板
+3. cubecl 短序列 launch 开销（和这条 flex 路径无关）

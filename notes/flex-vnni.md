@@ -23,6 +23,16 @@
 - flex `int_matmul` 5/5（含 fused zp vs 代数展开对照）
 - burn-onnx MatMulInteger insta 11/11
 
-## 对拍
+## 对拍（本机 4 核 Xeon）
 
-见 `notes/poc-results.md`「flex VNNI」；数字在 `compare_ort` 跑完后补。
+| 场景 | 分块 flex | VNNI+zp | vs 分块 | vs Mac ort |
+|---|---:|---:|---:|---:|
+| 16 tok | 75.7 ms | **33.2 ms** | 2.3× | 7.7× |
+| 8 条 batch | 18.1 s | **8.73 s** | 2.1× | 6.2× |
+| 512 tok | 2.80 s | **1.46 s** | 1.9× | 7.3× |
+
+mean cos **0.9960**。加载 RSS 88 MB；`mem_stress -- 5 2048` 峰值 **215 MB**（4×512 稳态 ~6.4 s）。
+
+512 tok 已贴近先前估的非 GEMM 下限（~1.3 s：96 个 DQL + LN）。再往下要融 DQL，不是再写 GEMM。
+
+详见 `notes/poc-results.md`「flex VNNI」。
