@@ -4,10 +4,18 @@
 //! Worst case per `pack_batches`: rows × padded_len ≤ 4096 with 512-token rows
 //! → 8 rows × 512 tokens per forward. Repeat to see whether RSS ratchets.
 //!
-//! Run: `cargo run --release -p e5-embed --bin mem_stress`
-//! or wrap with `/usr/bin/time -l` for the kernel-reported peak footprint.
+//! Run: `cargo run --release -p e5-embed --bin mem_stress -- 5 2048`
+//! Compare the whole process against ONNX Runtime with
+//! `python3 crates/e5-embed/scripts/ort_mem.py` (and `--arena`).
 
-use e5_embed::{E5Embedder, current_rss_mb, default_model_dir};
+use e5_embed::{E5Embedder, current_hwm_mb, current_rss_mb, default_model_dir};
+
+fn rss_line(label: &str) {
+    match current_hwm_mb() {
+        Some(hwm) => println!("{label}: {:.1} MB  HWM {:.1} MB", current_rss_mb(), hwm),
+        None => println!("{label}: {:.1} MB", current_rss_mb()),
+    }
+}
 
 fn main() -> anyhow::Result<()> {
     let rounds: usize = std::env::args()
@@ -19,11 +27,11 @@ fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(4096);
 
-    println!("RSS at start: {:.1} MB", current_rss_mb());
+    rss_line("RSS at start");
     let device = burn::prelude::Device::default();
     let embedder = E5Embedder::load(&default_model_dir(), &device)?
         .with_max_batch_tokens(budget);
-    println!("RSS after model load: {:.1} MB", current_rss_mb());
+    rss_line("RSS after model load");
 
     // Largest forward the budget allows: (budget/512) rows × ~512 tokens.
     let long_text: String = "Night ride along the riverside with friends. 周末滨江夜骑。 ".repeat(55);
@@ -41,13 +49,23 @@ fn main() -> anyhow::Result<()> {
         let out = embedder.embed_passages(&texts)?;
         let rss = current_rss_mb();
         peak = peak.max(rss);
-        println!(
-            "round {round:2}: {:8.1} ms, RSS {rss:7.1} MB ({} vectors)",
-            t.elapsed().as_secs_f64() * 1e3,
-            out.len()
-        );
+        match current_hwm_mb() {
+            Some(hwm) => println!(
+                "round {round:2}: {:8.1} ms, RSS {rss:7.1} MB  HWM {hwm:7.1} MB ({} vectors)",
+                t.elapsed().as_secs_f64() * 1e3,
+                out.len()
+            ),
+            None => println!(
+                "round {round:2}: {:8.1} ms, RSS {rss:7.1} MB ({} vectors)",
+                t.elapsed().as_secs_f64() * 1e3,
+                out.len()
+            ),
+        }
     }
     println!("\npeak observed RSS: {peak:.1} MB (container budget: 512 MB)");
+    if let Some(hwm) = current_hwm_mb() {
+        println!("kernel peak HWM:    {hwm:.1} MB");
+    }
     println!(
         "verdict: {}",
         if peak <= 512.0 {

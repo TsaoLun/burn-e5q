@@ -387,3 +387,34 @@ pub fn current_rss_mb() -> f64 {
         .map(|u| u.physical_mem as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0)
 }
+
+fn proc_status_kb(key: &str) -> Option<f64> {
+    let text = std::fs::read_to_string("/proc/self/status").ok()?;
+    let prefix = format!("{key}:");
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix(&prefix) else {
+            continue;
+        };
+        return rest.split_whitespace().next()?.parse().ok();
+    }
+    None
+}
+
+/// Linux peak RSS (`VmHWM`). `None` on other OSes or if `/proc` is missing.
+pub fn current_hwm_mb() -> Option<f64> {
+    proc_status_kb("VmHWM").map(|kb| kb / 1024.0)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod mem_probe_tests {
+    #[test]
+    fn hwm_is_present_and_at_least_rss() {
+        let rss = super::current_rss_mb();
+        let hwm = super::current_hwm_mb().expect("VmHWM in /proc/self/status");
+        assert!(hwm > 0.0, "HWM should be positive, got {hwm}");
+        assert!(
+            hwm + 1.0 >= rss,
+            "HWM {hwm:.1} MB should be >= RSS {rss:.1} MB"
+        );
+    }
+}

@@ -12,7 +12,9 @@ use std::time::Instant;
 use anyhow::Context;
 use serde::Deserialize;
 
-use e5_embed::{E5_PASSAGE_PREFIX, E5_QUERY_PREFIX, E5Embedder, current_rss_mb, default_model_dir};
+use e5_embed::{
+    E5_PASSAGE_PREFIX, E5_QUERY_PREFIX, E5Embedder, current_hwm_mb, current_rss_mb, default_model_dir,
+};
 
 #[derive(Debug, Deserialize)]
 struct RefCase {
@@ -103,7 +105,14 @@ fn main() -> anyhow::Result<()> {
     println!("Reference model: {}", ref_data.model);
     println!("Reference file:  {ref_path}\n");
 
-    println!("RSS before model load: {:.1} MB", current_rss_mb());
+    match current_hwm_mb() {
+        Some(hwm) => println!(
+            "RSS before model load: {:.1} MB  HWM {:.1} MB",
+            current_rss_mb(),
+            hwm
+        ),
+        None => println!("RSS before model load: {:.1} MB", current_rss_mb()),
+    }
     let load_start = Instant::now();
     let device = burn::prelude::Device::default();
     println!(
@@ -115,11 +124,19 @@ fn main() -> anyhow::Result<()> {
         }
     );
     let embedder = E5Embedder::load(&default_model_dir(), &device)?;
-    println!(
-        "Model loaded in {:.2?}. RSS: {:.1} MB",
-        load_start.elapsed(),
-        current_rss_mb()
-    );
+    match current_hwm_mb() {
+        Some(hwm) => println!(
+            "Model loaded in {:.2?}. RSS: {:.1} MB  HWM {:.1} MB",
+            load_start.elapsed(),
+            current_rss_mb(),
+            hwm
+        ),
+        None => println!(
+            "Model loaded in {:.2?}. RSS: {:.1} MB",
+            load_start.elapsed(),
+            current_rss_mb()
+        ),
+    }
 
     // 1. Tokenizer parity: sentencepiece (burn side) vs HF tokenizers ids.
     println!("\n=== Tokenizer parity ===");
@@ -308,5 +325,8 @@ fn main() -> anyhow::Result<()> {
     );
 
     println!("\nRSS after all inference: {:.1} MB", current_rss_mb());
+    if let Some(hwm) = current_hwm_mb() {
+        println!("kernel peak HWM:         {hwm:.1} MB");
+    }
     Ok(())
 }
