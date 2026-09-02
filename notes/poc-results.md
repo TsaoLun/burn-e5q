@@ -222,7 +222,8 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 > 日期：2026-09-02。同一台 4 核 Xeon（`avx512_vnni`）。
 > 栈：`vendor/burn-route-int8-matmul` `2d1084f` + `vendor/burn-onnx-keep-int8-matmul` `7cc2d36`。
-> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`；`cargo run --release -p ort-mem -- -- 5 2048`；`python3 crates/e5-embed/scripts/ort_mem.py`。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`；`cargo run --release -p ort-mem -- -- 5 2048`。
+> 基线：本机 Rust `ort` 2.0.0-rc.13，CPU EP，arena off（inmotion-social）。不用 Python onnxruntime。
 > 实现：`notes/flex-dql.md`。
 
 ## TL;DR
@@ -236,58 +237,60 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 | 短文本 | **29.6 ms**（VNNI 33.2 → **1.12×**） | 调度主导，符合预期 |
 | 8 条 batch | **7.07 s**（8.73 → **1.23×**） | ✅ |
 | 512 tok | **1272 ms**（1458 → **1.15×**） | ✅ |
-| vs Mac ort | 短 **7.0×**，512 **6.3×** | 仍未达 ~2× |
-| vs 本机 AMX ort | 短 ~8.7×，512 ~25× | softmax/LN/eager 仍在 |
-| 内存 | 4×512 稳态 **213 MB** / HWM **315**；生产 ORT native arena off **162 / 268** | ✅ 进 512 MB；比整进程 ORT 大约 +51 MB RSS |
+| vs 本机 Rust ort | 短 **12×**（2.4 ms），packed batch **7.6×**（936 ms），512 **24×**（53.8 ms） | 未达 ~2× |
+| 内存 | 4×512 稳态 **213 / 315** vs Rust ort **162 / 268** | ✅ 进 512 MB；大约 +51 MB RSS |
 
 `dql-poc` 官方输入：`y_scale=0.019607844`，`zp=153`，`y` 以 `[153, 255, 0, …]` 开头。
 
 ## 延迟
 
-| 场景 | 朴素 flex | 分块 | VNNI+zp | **融 DQL** | Mac ort | 本机 ort |
+`ort-mem` 与 `compare_ort` 用同一份 `ref_data.json` token ids。packed batch 走和 burn 一样的 4096 token `pack_batches`（7 条非空 passage：一条 512 + 短句）。padded 是一次 pad 到最长的 7×512，ORT 自己也能这么跑。
+
+| 场景 | 朴素 flex | 分块 | VNNI+zp | **融 DQL** | **Rust ort arena off** | 倍数 |
 |---|---:|---:|---:|---:|---:|---:|
-| 16 tok | 130 ms | 75.7 ms | 33.2 ms | **29.6 ms** | 4.3 ms | 3.4 ms |
-| 8 条 batch | 26.2 s | 18.1 s | 8.73 s | **7.07 s** | 1.41 s | 0.53 s |
-| 512 tok | 3.82 s | 2.80 s | 1.46 s | **1.27 s** | 201 ms | 50 ms |
+| 16 tok | 130 ms | 75.7 ms | 33.2 ms | **29.6 ms** | **2.4 ms** | **12×** |
+| 7 条 packed | 26.2 s | 18.1 s | 8.73 s | **7.07 s** | **936 ms** | **7.6×** |
+| 7 条 padded 7×512 | — | — | — | — | 946 ms | — |
+| 512 tok | 3.82 s | 2.80 s | 1.46 s | **1.27 s** | **53.8 ms** | **24×** |
 
-## 吞吐（本机 flex；ort 列按 `ref_data.json` / 本机 AMX 反推）
+arena on 时 ORT 短句 2.3 ms、packed 516 ms、512 **52.6 ms**（更快，但内存见下）。Mac 上 Python ort 写进 `ref_data.json` 的 4.3 / 1412 / 201 ms 不再当基线。
 
-| 场景 | 融 DQL q/s | 融 DQL tok/s | VNNI+zp tok/s | Mac ort q/s | 本机 ort q/s |
-|---|---:|---:|---:|---:|---:|
-| 16 tok | **33.8** | **540** | 482 | 235 | 294 |
-| 8 条（598 tok） | **1.13** | **85** | 68 | 5.67 | 15.1 |
-| 512 tok | **0.79** | **403** | 351 | 4.98 | 20.0 |
+Rust ort（rc.13 自带的 ORT）对 `ref_data.json` 里 Python 1.29 向量的 mean cos 也是 **0.9968**（min 0.9956）。burn vs 那份 ref 的 0.996 和「两个 ORT 构建之间」是同一量级，不是 burn 独有的漂移。
 
-## 内存：burn vs 整进程 ORT
+## 吞吐（本机 flex vs 本机 Rust ort，arena off）
 
-口径：同一台 4 核 Xeon、同一份 `model_qint8_avx512_vnni.onnx`（磁盘 112.9 MB）、同一形状（`mem_stress -- 5 2048` = 4×512，5 轮）。数字是 **进程 VmRSS / VmHWM**，不是权重文件大小。
+| 场景 | 融 DQL q/s | 融 DQL tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok | **33.8** | **540** | **414** | **6625** |
+| packed 7 条（593 tok） | **1.13** | **85** | **7.48** | **633** |
+| 512 tok | **0.79** | **403** | **18.6** | **9510** |
 
-- **生产对照**：`cargo run --release -p ort-mem`（Rust `ort` 2.0.0-rc.13，不链 Burn；arena off = inmotion-social）
-- **参考对照**：`python3 crates/e5-embed/scripts/ort_mem.py`（CPython + onnxruntime 1.29.0，`gen_ref.py` 同源）
-- **burn**：`cargo run --release -p e5-embed --bin mem_stress -- 5 2048`
+## 内存：burn vs 整进程 Rust ort
 
-| 阶段 | burn 融 DQL | **ORT native arena off** | ORT native arena on | ORT Python arena off | ORT Python arena on |
-|---|---:|---:|---:|---:|---:|
-| 进程启动 | 3.1 | 7.2 | 7.2 | 13.0 | 12.9 |
-| 运行时库就绪 | （链进二进制） | 16.4 | 16.5 | 53.7 | 53.6 |
-| 模型加载后 RSS | 87.6 | 157.8 | 156.8 | 198.0 | 198.7 |
-| 加载冲高 HWM | 97.4 | 235.3 | 235.2 | 272.5 | 272.6 |
-| 4×512 稳态 RSS | 213.4 | **162.2** | 404.2 | 201.9 | 445.0 |
-| 4×512 峰值 HWM | 315.1 | **267.8** | 404.2 | 307.4 | 445.0 |
-| compare_ort 全流程 RSS | 236.1 | — | — | — | — |
-| compare_ort 全流程 HWM | 401.0 | — | — | — | — |
+口径：同一台 4 核 Xeon、同一份 ONNX（磁盘 112.9 MB）。数字是 **进程 VmRSS / VmHWM**。ORT 列来自 `cargo run --release -p ort-mem`（Rust `ort`，不链 Burn）。生产是 **arena off**。
 
-和 VNNI+zp 比，融 DQL 几乎不改占用（加载 ~88 MB，4×512 稳态 ~214 MB）。
+| 阶段 | burn 融 DQL | **Rust ort arena off** | Rust ort arena on |
+|---|---:|---:|---:|
+| 进程启动 | 3.1 | 7.1 | 7.1 |
+| 运行时库就绪 | （链进二进制） | 16.3 | 16.5 |
+| 模型加载后 RSS | 87.6 | 153.1 | 154.0 |
+| 加载冲高 HWM | 97.4 | 234.9 | 235.3 |
+| 4×512 单独压测 RSS | 213.4 | **162.2** | 404.2 |
+| 4×512 单独压测 HWM | 315.1 | **267.8** | 404.2 |
+| compare 全流程 RSS | 236.1 | **193.1** | 564.1 |
+| compare 全流程 HWM | 401.0 | **346.4** | 564.1 |
+
+4×512 单独一行来自只跑 `mem_stress` 形状的进程（burn：`mem_stress -- 5 2048`；ORT：上一轮纯压测）。compare 全流程是同一进程里跑完 cosine + 短/packed/padded/512 之后的占用（ORT 的 padded 7×512 会把 HWM 抬到 346）。
 
 读法：
 
-1. **容器 / cgroup 只看整进程。** 生产是 Rust+ort、arena off：4×512 稳态 burn **213 MB** vs ORT **162 MB**（约 +51 MB）；峰值 HWM **315 vs 268**（约 +47 MB）。两边都进 512 MB。Python 行比 native 大约多 40 MB，那是 CPython+numpy，不是 ORT 更肥。
-2. **加载增量（减宿主）** 说明权重+运行时：burn 87.6−3.1 ≈ **85 MB**；ORT native 157.8−7.2 ≈ **151 MB**；ORT Python 198−54 ≈ **144 MB**。burn 加载更轻，ORT 加载 HWM 冲到 235 再回落到 ~158（初始化拷贝）。
-3. **推理 scratch 才是 burn 更肥的原因。** 4×512 HWM 相对加载后：burn 315−88 ≈ **+227 MB**；ORT native 268−158 ≈ **+110 MB**。DQL 中间张量少了约 10 趟，但 attention `[12,S,S]` 的 softmax/f32 激活仍在，所以融 DQL 峰值几乎不变。
-4. **arena on** 稳态 404–445 MB，逼近 512 MB 线——这就是线上关掉 CPU arena 的原因。关 arena 之后当前 RSS 会回落，但 HWM 仍记录冲高。
+1. **容器只看整进程。** arena off：4×512 稳态 burn **213 vs 162**（+51 MB），HWM **315 vs 268**（+47 MB）。compare 全流程 HWM **401 vs 346**。两边都进 512 MB。
+2. **加载更轻的是 burn**（88 vs 153）。ORT 加载会冲到 HWM 235 再回落到 ~153。
+3. **scratch 更重的是 burn。** 4×512 HWM 相对加载后：burn +227 MB，ORT +114 MB。
+4. **arena on 不能当生产对照。** 单独 4×512 已到 404 MB；把 compare 的 7×512 叠进去会到 **564–590 MB**，超过 512 MB 容器线。这就是线上关 arena 的原因。
 
-4×512 稳态时延：burn ~5.8 s；ORT native arena off ~0.7 s；arena on ~0.23 s。
+4×512 时延：burn ~5.8 s；Rust ort arena off ~0.4–0.7 s（看进程里是否已经分配过 scratch）。
 
 ## 还剩什么
 
-512 tok 仍有 ~1.1 s 不是 GEMM 也不是 DQL：softmax、LayerNorm、eager 调度。要到 ~2× Mac ort（512≈400 ms）得融 softmax/LN，或把 DQL+MMI+反量化收成一个 op（先前档位 B）。权重侧 AMX 是另一条线。
+512 tok 仍有 ~1.2 s 不是 GEMM 也不是 DQL：softmax、LayerNorm、eager 调度。本机 Rust ort 512 是 **54 ms**，要到 ~2× 得进 ~100 ms。融 softmax/LN，或把 DQL+MMI+反量化收成一个 op（先前档位 B）。权重侧 AMX 是另一条线。

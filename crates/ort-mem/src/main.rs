@@ -345,7 +345,7 @@ fn main() -> anyhow::Result<()> {
         min_cos = min_cos.min(cos);
         sum_cos += cos as f64;
         n_cos += 1;
-        let mark = if cos > 0.999 { "✓" } else { "✗" };
+        let mark = if cos > 0.99 { "·" } else { "✗" };
         let label: String = case.text.chars().take(28).collect();
         println!(
             "  {mark} cos={cos:.6}  {}{:?}",
