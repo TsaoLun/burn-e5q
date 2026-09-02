@@ -93,12 +93,12 @@ tempfile = "3.24.0"
 thiserror = { version = "2", default-features = false }
 toml = { version = "1.1.2", default-features = false, features = ["parse", "serde"] }
 
-# flex VNNI + fused MatMulInteger zp (TsaoLun/burn push was 403; snapshot on burn-e5q).
-burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "30cab971f953fab70e7c7de10f8d33d9d39f6fc4" }
-burn-flex = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "30cab971f953fab70e7c7de10f8d33d9d39f6fc4" }
-burn-pack = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "30cab971f953fab70e7c7de10f8d33d9d39f6fc4" }
-burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "30cab971f953fab70e7c7de10f8d33d9d39f6fc4" }
-burn-tensor = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "30cab971f953fab70e7c7de10f8d33d9d39f6fc4" }
+# fused DynamicQuantizeLinear (TsaoLun/burn push was 403; snapshot on burn-e5q).
+burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2d1084f760c8f948433d960d68cb667ca31b7290" }
+burn-flex = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2d1084f760c8f948433d960d68cb667ca31b7290" }
+burn-pack = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2d1084f760c8f948433d960d68cb667ca31b7290" }
+burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2d1084f760c8f948433d960d68cb667ca31b7290" }
+burn-tensor = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2d1084f760c8f948433d960d68cb667ca31b7290" }
 
 ### For local development. ###
 # burn = { path = "../burn/crates/burn", default-features = false }
