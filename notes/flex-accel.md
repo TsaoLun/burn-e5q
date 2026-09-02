@@ -24,3 +24,5 @@
 mean cos **0.9960**，与阶段 3 相同。加载后 RSS 88 MB，全流程 254 MB。
 
 详见 `notes/poc-results.md`「flex 加速」。
+
+后续：`notes/flex-vnni.md`（`target-cpu=native` + `vpdpbusd` + 融合 zp）。

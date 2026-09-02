@@ -20,9 +20,9 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 
 | Crate | Source | Current pin |
 |---|---|---|
-| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-keep-int8-matmul` | `b88643ea7018557b38b511544f9933b4c2e5f98b` |
+| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-keep-int8-matmul` | `3a2bf47daa6abc36cac771e9d6392294408b5544` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-route-int8-matmul` | `005354fdd25b2780af0d53d40de3d9252c79b802` |
+| `burn`, `burn-store` | this repo `vendor/burn-route-int8-matmul` | `30cab971f953fab70e7c7de10f8d33d9d39f6fc4` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is

@@ -76,9 +76,10 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 下一步（按优先级）
 
-1. **flex 加速**（`notes/flex-accel.md`）：分块 u8/i8 GEMM 已落地；短文本 130→76 ms，512 tok 3.82→2.80 s。还没打平 ort。
-2. **阶段 4 cubecl**：接线见下文；短文本仍被 launch 卡住。下一步是融合 zp，不是再写朴素 GEMM。
-3. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
+1. **flex VNNI + 融合 zp**（`notes/flex-vnni.md`）：`vpdpbusd` + `matmul_integer` 已接线。对拍数字待 `compare_ort`。
+2. **flex 分块**（`notes/flex-accel.md`）：SSE2 下 130→76 ms / 3.82→2.80 s。被 native+VNNI 取代为默认路径。
+3. **阶段 4 cubecl**：短文本仍被 launch 卡住；叶子还不是手写 VNNI。
+4. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
 
 ---
 
@@ -174,3 +175,16 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 ## 还剩什么
 
 内核还不是 `vpdpbusd`；96 个 DQL 和代数 zp 的 `sum_dim` 仍在。短文本再往下会碰到这些固定开销，不是再改一版三重循环能解决的。
+
+下一步见 `notes/flex-vnni.md`。
+
+---
+
+# flex VNNI + 融合 zp
+
+> 日期：2026-09-02。环境：同机 4 核 Xeon（`avx512_vnni`）。
+> 栈：`vendor/burn-route-int8-matmul` `30cab97` + `vendor/burn-onnx-keep-int8-matmul` `3a2bf47` + `.cargo/config.toml` `target-cpu=native`。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`
+> 实现：`notes/flex-vnni.md`。
+
+对拍数字待跑完 `compare_ort` 后写入。
