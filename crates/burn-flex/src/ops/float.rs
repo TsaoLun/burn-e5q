@@ -967,6 +967,12 @@ impl FloatTensorOps<Flex> for Flex {
         unary::round(tensor)
     }
 
+    fn float_dynamic_quantize_linear(
+        tensor: FloatTensor<Flex>,
+    ) -> (IntTensor<Flex>, FloatTensor<Flex>, IntTensor<Flex>) {
+        crate::ops::dql::dynamic_quantize_linear(tensor)
+    }
+
     fn float_floor(tensor: FloatTensor<Flex>) -> FloatTensor<Flex> {
         unary::floor(tensor)
     }

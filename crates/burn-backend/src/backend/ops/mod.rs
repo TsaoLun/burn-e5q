@@ -1,5 +1,6 @@
 mod activation;
 mod bool_tensor;
+mod dql;
 mod int_tensor;
 mod modules;
 mod pad;
@@ -14,6 +15,7 @@ pub(crate) mod sort;
 
 pub use activation::*;
 pub use bool_tensor::*;
+pub use dql::*;
 pub use int_tensor::*;
 pub use modules::*;
 #[doc(hidden)]

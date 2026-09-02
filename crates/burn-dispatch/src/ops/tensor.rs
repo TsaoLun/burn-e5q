@@ -437,6 +437,16 @@ impl FloatTensorOps<Self> for Dispatch {
         unary_float!(tensor, float, |tensor| B::float_round(tensor) => Float)
     }
 
+    fn float_dynamic_quantize_linear(
+        tensor: FloatTensor<Self>,
+    ) -> (IntTensor<Self>, FloatTensor<Self>, IntTensor<Self>) {
+        multi_op!(
+            inputs[(tensor, float)],
+            outputs[(y, Int), (scale, Float), (zp, Int)],
+            B::float_dynamic_quantize_linear(tensor)
+        )
+    }
+
     fn float_floor(tensor: FloatTensor<Self>) -> FloatTensor<Self> {
         unary_float!(tensor, float, |tensor| B::float_floor(tensor) => Float)
     }

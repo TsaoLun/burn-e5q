@@ -420,6 +420,23 @@ $$\text{erf}\(x\) = \frac{2}{\sqrt{\pi}} \int_0^x e^{-t^2} dt$$
         Tensor::new(quantize_dynamic_impl(self.primitive, scheme))
     }
 
+    /// ONNX [`DynamicQuantizeLinear`](https://onnx.ai/onnx/operators/onnx__DynamicQuantizeLinear.html).
+    ///
+    /// Per-tensor uint8 quantization of `self`:
+    ///
+    /// - `y_scale = (max(0, max(x)) − min(0, min(x))) / 255`
+    /// - `y_zero_point = clamp(round(0 − min(0, min(x)) / y_scale), 0, 255)`
+    /// - `y = clamp(round(x / y_scale) + y_zero_point, 0, 255)`
+    ///
+    /// Rounding is ties-to-even (same as [`round`](Self::round)). `y` is `U8`
+    /// with this tensor's shape; `y_scale` is `F32` of shape `[1]`;
+    /// `y_zero_point` is `U8` of shape `[1]`.
+    #[must_use]
+    pub fn dynamic_quantize_linear(self) -> (Tensor<D, Int>, Tensor<1>, Tensor<1, Int>) {
+        let (y, scale, zp) = dynamic_quantize_linear_impl(self.primitive);
+        (Tensor::new(y), Tensor::new(scale), Tensor::new(zp))
+    }
+
     /// Convert the tensor back to a higher precision data type.
     ///
     /// If the tensor is not quantized, its value is simply returned.
@@ -1179,6 +1196,15 @@ fn quantize_impl(
 
 fn quantize_dynamic_impl(p: BridgeTensor, scheme: &QuantScheme) -> BridgeTensor {
     BridgeTensor::qfloat(Dispatch::quantize_dynamic(p.into_float(), scheme))
+}
+
+fn dynamic_quantize_linear_impl(p: BridgeTensor) -> (BridgeTensor, BridgeTensor, BridgeTensor) {
+    let (y, scale, zp) = Dispatch::float_dynamic_quantize_linear(p.into_float());
+    (
+        BridgeTensor::int(y),
+        BridgeTensor::float(scale),
+        BridgeTensor::int(zp),
+    )
 }
 
 fn dequantize_impl(p: BridgeTensor) -> BridgeTensor {

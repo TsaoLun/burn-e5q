@@ -1342,6 +1342,25 @@ pub trait FloatTensorOps<B: Backend> {
     /// A tensor with the same shape as `tensor` with rounded values.
     fn float_round(tensor: FloatTensor<B>) -> FloatTensor<B>;
 
+    /// ONNX [`DynamicQuantizeLinear`](https://onnx.ai/onnx/operators/onnx__DynamicQuantizeLinear.html).
+    ///
+    /// Per-tensor uint8 quantization:
+    ///
+    /// - `y_scale = (max(0, max(x)) − min(0, min(x))) / 255`
+    /// - `y_zero_point = clamp(round(0 − min(0, min(x)) / y_scale), 0, 255)`
+    /// - `y = clamp(round(x / y_scale) + y_zero_point, 0, 255)`
+    ///
+    /// Rounding is ties-to-even. `y` is `U8` with `x`'s shape; `y_scale` is
+    /// `F32` `[1]`; `y_zero_point` is `U8` `[1]`.
+    ///
+    /// The default implementation expands the formula over existing ops.
+    /// CPU backends should override this with a fused minmax+quantize kernel.
+    fn float_dynamic_quantize_linear(
+        tensor: FloatTensor<B>,
+    ) -> (IntTensor<B>, FloatTensor<B>, IntTensor<B>) {
+        super::float_dynamic_quantize_linear_expanded::<B>(tensor)
+    }
+
     /// Returns a new tensor with floored values.
     ///
     /// # Arguments
