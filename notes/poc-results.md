@@ -220,7 +220,56 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 # 融 DQL
 
-> 日期：2026-09-02。栈：`vendor/burn-route-int8-matmul` `2d1084f` + `vendor/burn-onnx-keep-int8-matmul` `7cc2d36`。
-> 实现：`notes/flex-dql.md`。对拍数字在 `compare_ort` / `mem_stress` 跑完后填入。
+> 日期：2026-09-02。同一台 4 核 Xeon（`avx512_vnni`）。
+> 栈：`vendor/burn-route-int8-matmul` `2d1084f` + `vendor/burn-onnx-keep-int8-matmul` `7cc2d36`。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`。
+> 实现：`notes/flex-dql.md`。
 
-待测：性能（短 / batch8 / 512）、吞吐（q/s、tok/s）、内存（加载 RSS + `mem_stress -- 5 2048`）。
+## TL;DR
+
+只把 DQL 收成一个 kernel（minmax + 一趟量化），没有把 DQL+MMI+反量化打成一个 op。短句几乎不动；512 从 1.46 s 掉到 **1.27 s**（约 13%），落在先前估的档位 A。
+
+| 维度 | 结果 | 判定 |
+|---|---|---|
+| 数值 | min cos 0.9935，mean **0.9960** | ✅ 与 VNNI+zp 一致 |
+| 检索 | top-1 2/2；top-3 严格顺序 0/2 | ⚠️ 同前 |
+| 短文本 | **29.6 ms**（VNNI 33.2 → **1.12×**） | 调度主导，符合预期 |
+| 8 条 batch | **7.07 s**（8.73 → **1.23×**） | ✅ |
+| 512 tok | **1272 ms**（1458 → **1.15×**） | ✅ |
+| vs Mac ort | 短 **7.0×**，512 **6.3×** | 仍未达 ~2× |
+| vs 本机 AMX ort | 短 ~8.7×，512 ~25× | softmax/LN/eager 仍在 |
+| 内存 | 加载 87.5 MB；`mem_stress 2048` **214 MB** | ✅ 与 VNNI 同量级 |
+
+`dql-poc` 官方输入：`y_scale=0.019607844`，`zp=153`，`y` 以 `[153, 255, 0, …]` 开头。
+
+## 延迟
+
+| 场景 | 朴素 flex | 分块 | VNNI+zp | **融 DQL** | Mac ort | 本机 ort |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 tok | 130 ms | 75.7 ms | 33.2 ms | **29.6 ms** | 4.3 ms | 3.4 ms |
+| 8 条 batch | 26.2 s | 18.1 s | 8.73 s | **7.07 s** | 1.41 s | 0.53 s |
+| 512 tok | 3.82 s | 2.80 s | 1.46 s | **1.27 s** | 201 ms | 50 ms |
+
+## 吞吐（本机 flex；ort 列按 `ref_data.json` / 本机 AMX 反推）
+
+| 场景 | 融 DQL q/s | 融 DQL tok/s | VNNI+zp tok/s | Mac ort q/s | 本机 ort q/s |
+|---|---:|---:|---:|---:|---:|
+| 16 tok | **33.8** | **540** | 482 | 235 | 294 |
+| 8 条（598 tok） | **1.13** | **85** | 68 | 5.67 | 15.1 |
+| 512 tok | **0.79** | **403** | 351 | 4.98 | 20.0 |
+
+## 内存
+
+| 阶段 | VNNI+zp | **融 DQL** |
+|---|---:|---:|
+| 启动（compare_ort） | — | 3.2 MB |
+| 模型加载 | 88 MB | **87.5 MB** |
+| compare_ort 全流程后 | — | 236 MB |
+| `mem_stress -- 5 2048` 峰值 | 215 MB | **213.6 MB** |
+| 4×512 稳态 | ~6.4 s | **~5.6 s** |
+
+DQL 中间张量少了约 10 趟，但 attention `[12,S,S]` 的 softmax/f32 激活仍在，峰值几乎不变。稳态变快是因为每层 DQL 不再走多趟 clone。
+
+## 还剩什么
+
+512 tok 仍有 ~1.1 s 不是 GEMM 也不是 DQL：softmax、LayerNorm、eager 调度。要到 ~2× Mac ort（512≈400 ms）得融 softmax/LN，或把 DQL+MMI+反量化收成一个 op（先前档位 B）。权重侧 AMX 是另一条线。
