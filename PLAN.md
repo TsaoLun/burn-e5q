@@ -174,5 +174,6 @@ y = clamp(round(x / y_scale) + y_zero_point, qmin, qmax)
 - [x] 阶段 1：burn-onnx 本地实现 DQL，e5-small 图不再报 DQL unsupported（fork 分支 `add-dynamic-quantize-linear`，含 graph.rs clone-tracking 修复；官方 6 条 node test 编译通过）
 - [x] 阶段 2：model-check 通过（`cargo xtask model-check --model multilingual-e5-small`，last_hidden_state 与 pooled 均在 1e-4 内匹配 ort；fork 分支 `add-multilingual-e5-small-model-check`）
 - [x] 阶段 3：PoC 对拍完成（`notes/poc-results.md`：tokenizer 9/9 ✓，int8 cos 0.996 属固有跨引擎分歧，top-1 检索 2/2；延迟差 19–45×；4096 预算 RSS 640MB 超标，降 2048 → 416MB ✓）
-- [ ] 阶段 4：i8 GEMM 栈已接线（见 `notes/stage-4-impl.md`）；对拍延迟待记入 `notes/poc-results.md`
+- [x] 阶段 4 接线：u8/i8 CpuGemm + host TM + 代数 zp（`notes/stage-4-impl.md`）；`compare_ort --features cpu` 跑通，mean cos 0.995
+- [ ] 阶段 4 延迟：短文本仍远慢于 ort（launch + 未融合 zp）；见 `notes/poc-results.md` 阶段 4
 - [ ] 阶段 5：inmotion-social 部署纯 burn 版本

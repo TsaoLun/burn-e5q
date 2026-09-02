@@ -76,6 +76,64 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 下一步（按优先级）
 
-1. **阶段 4**（`notes/stage-4.md`）：在 [TsaoLun/cubek](https://github.com/TsaoLun/cubek) 做 i8 GEMM，经本仓库 `[patch]` 接入 `e5-embed --features cpu`。
-2. 内存：若阶段 4 后 scratch 仍超预算，默认预算降 2048（已验证可行）。
+1. **阶段 4**（`notes/stage-4.md` / `notes/stage-4-impl.md`）：i8 GEMM 栈已接线；延迟见下文「阶段 4」。下一步是融合 zp、砍 launch，而不是再写一套朴素 GEMM。
+2. 内存：若阶段 4 后 scratch 仍超预算，默认预算降 2048（flex 已验证可行）。
 3. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
+
+---
+
+# 阶段 4：cubecl-cpu i8 GEMM 对拍
+
+> 日期：2026-09-02。环境：Linux x86_64 KVM，4 核 Xeon（`avx512_vnni` + `amx_int8`），rustc 1.98，`CXX=g++`。
+> 命令：`cargo run --release -p e5-embed --features cpu --no-default-features --bin compare_ort`
+> 栈：`notes/stage-4-impl.md`（vendor snapshot：cubek CpuGemm + burn `int_matmul`→I32 + burn-onnx 代数 zp + cubecl host TargetMachine）。
+
+## TL;DR
+
+| 维度 | 结果 | 判定 |
+|---|---|---|
+| 图导入 / 编译 | 1630 节点、96×DQL+96×MatMulInteger 在 cubecl-cpu 上编过、跑通 | ✅ |
+| tokenizer | 9/9 与 HF ids 一致 | ✅ |
+| 数值 | min cos 0.9905，mean 0.9953（flex 阶段 3 为 mean 0.9960） | ⚠️ 同属 int8 跨引擎分歧 |
+| 检索 | top-1 2/2；top-3 严格顺序 0/2（与 flex 相同模式） | ⚠️ |
+| 延迟 vs Mac `ref_data.json` ort | 短文本 **450×**（1936 vs 4.3 ms）；512 tok **16×**（3201 vs 201 ms） | ❌ 未达 ~2× 目标 |
+| 延迟 vs 本仓库 flex（同机阶段 3 约 130 ms / 3.8 s） | 短文本更慢；长文本约 **1.2× 快于 flex** | ⚠️ 短序列被 launch 卡住 |
+
+叶子仍是 tiled `SUM_PROD` + LLVM host TM 自动向量化，**不是**手写 `vpdpbusd`。本机 ort/AMX 基线（约 3.4 ms / 50 ms）更远。
+
+## 延迟明细（cubecl-cpu，release，进程内 3 次取 min）
+
+对拍里 cosine 段已用过同一条短中文，所以 1936 ms 是 **稳态**，不是首次 JIT。
+
+| 场景 | cubecl-cpu | Mac ort（`ref_data.json`） | 倍数 |
+|---|---|---|---|
+| 单条短文本（16 tok） | 1936 ms | 4.3 ms | ~450× |
+| 8 条 batch（含 512 长文） | 7232 ms | 1412 ms | ~5.1× |
+| 单条 512 tok | 3201 ms | 201 ms | ~16× |
+
+模型加载 253 ms，RSS 加载后 241 MB，全部推理后 **665 MB**。
+
+## 内存（`mem_stress -- 5 2048`）
+
+| 阶段 | RSS |
+|---|---|
+| 启动 | 40 MB |
+| 模型加载 | 241 MB |
+| 4×512 首 round（含 JIT） | 515 MB / 8037 ms |
+| round 1–4 稳态 | 516 MB / ~6.2 s |
+
+2048 token 预算峰值 **515.5 MB**，刚过 512 MB 容器线（flex 同预算 416 MB）。CubeCL scratch + zp 的 i32 `sum_dim` 更肥。4096 预算未再测（compare_ort 全流程已到 665 MB）。
+
+## 为什么没打平 ort
+
+1. **Launch 开销**：图约 1630 个节点。每个 MatMulInteger 现在是 `u8/i8 GEMM` **再加** `sum_dim`×2 + cast/mul/sub/add（代数 zp）。短序列（K=32、M≈16）上这些 CubeCL-CPU launch 比 flex 的进程内 i32 三重循环还贵。
+2. **GEMM 叶子不是 AMX/VNNI intrinsic**：host `TargetMachine` 只是让 LLVM O3 有机会 autovec；ort 走的是 AMX/`vpdpbusd`。
+3. **96 个 DQL** 仍在 float 路径，没有和 GEMM 融合。
+
+数值没有崩：mean cos 0.995 说明 u8×i8→i32 + 代数 zp 与 ort 同量级，问题在调度/内核质量，不在语义。
+
+## 下一步（性能）
+
+1. 把 zp 补偿融进同一个 integer GEMM（`(A-za)@(B-zb)` 一次 launch），砍掉每层两次 `sum_dim`。
+2. 给 8-bit 叶子真正的 VNNI/AMX 微内核（或确认 LLVM 已打出 `vpdpbusd`）。
+3. 有写权限后把 `vendor/*` 迁回 TsaoLun/{cubek,burn,burn-onnx,cubecl} 真分支。

@@ -38,8 +38,9 @@
 
 ## 预期
 
-三步做完 + host TM：**不会**打平本机 AMX ort。长序列有机会靠近 `ref_data.json` 的 Mac ort（~2×）；
-短序列仍可能被 ~1630 次 launch + 96 次 DQL 卡住。
+三步做完 + host TM：**不会**打平本机 AMX ort。实测（4 核 Xeon，`compare_ort --features cpu`）：
+短文本 1936 ms（比 flex 更慢，launch 主导）；512 tok 3201 ms（略快于 flex ~3.8 s，仍是 Mac ort 的 ~16×）。
+见 `notes/poc-results.md` 阶段 4。
 
 ## 把 snapshot 迁回真 fork
 
