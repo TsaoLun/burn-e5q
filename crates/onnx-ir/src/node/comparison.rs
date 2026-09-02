@@ -1,0 +1,432 @@
+//! # Comparison Operations (Equal, Greater, Less, GreaterOrEqual, LessOrEqual)
+//!
+//! Comparison operators perform element-wise comparisons between two input tensors and return
+//! boolean tensors indicating the result of the comparison at each position. These operations
+//! support broadcasting according to ONNX broadcasting rules.
+//!
+//! **ONNX Specs**:
+//! - Equal: <https://onnx.ai/onnx/operators/onnx__Equal.html>
+//! - Greater: <https://onnx.ai/onnx/operators/onnx__Greater.html>
+//! - Less: <https://onnx.ai/onnx/operators/onnx__Less.html>
+//! - GreaterOrEqual: <https://onnx.ai/onnx/operators/onnx__GreaterOrEqual.html>
+//! - LessOrEqual: <https://onnx.ai/onnx/operators/onnx__LessOrEqual.html>
+//!
+//! ## Opset Versions
+//!
+//! - **Equal**:
+//!   - Opset 7-10: Initial version with basic type support
+//!   - Opset 11-12: Extended type support for additional numeric types
+//!   - Opset 13-18: Added bfloat16 support
+//!   - Opset 19+: Added int4 and uint4 support
+//!
+//! - **Greater**:
+//!   - Opset 7-8: Initial version with basic type support
+//!   - Opset 9-12: Extended type support for additional numeric types
+//!   - Opset 13+: Added bfloat16 support
+//!
+//! - **Less**:
+//!   - Opset 7-8: Initial version with basic type support
+//!   - Opset 9-12: Extended type support for additional numeric types
+//!   - Opset 13+: Added bfloat16 support
+//!
+//! - **GreaterOrEqual**:
+//!   - Opset 12-15: Initial version
+//!   - Opset 16+: Added bfloat16 support
+//!
+//! - **LessOrEqual**:
+//!   - Opset 12-15: Initial version
+//!   - Opset 16+: Added bfloat16 support
+//!
+//! ## Implementation Notes
+//!
+//! - All comparison operations output boolean tensors (element type: bool)
+//! - The output rank is determined by the maximum rank of the input tensors
+//! - When both inputs are scalars, the output is a scalar boolean
+//! - Special handling for Shape-to-Shape comparisons where the output is also a Shape type
+
+use onnx_ir_derive::NodeBuilder;
+
+use crate::ir::{Argument, BoolStore, DType, Node, RawNode};
+use crate::processor::{
+    ArgPreference, InputPreferences, InputSpec, NodeProcessor, NodeSpec, OutputPreferences,
+    OutputSpec, ProcessError,
+};
+
+/// Node representation for Equal operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct EqualNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+}
+
+/// Node representation for Greater operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct GreaterNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+}
+
+/// Node representation for GreaterOrEqual operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct GreaterOrEqualNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+}
+
+/// Node representation for Less operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct LessNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+}
+
+/// Node representation for LessOrEqual operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct LessOrEqualNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+}
+
+/// Update output type for comparison operations (e.g., Equal, Greater) to max input rank.
+pub(crate) fn elementwise_comparison_outputs(node: &mut RawNode) {
+    node.outputs[0].ty =
+        crate::processor::broadcast_output_type(&node.inputs, Some(DType::Bool(BoolStore::Native)));
+}
+
+pub(crate) struct ComparisonProcessor;
+
+impl NodeProcessor for ComparisonProcessor {
+    type Config = ();
+
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            min_opset: 1,
+            max_opset: None,
+            inputs: InputSpec::Exact(2),
+            outputs: OutputSpec::Exact(1),
+        }
+    }
+
+    fn input_preferences(
+        &self,
+        node: &RawNode,
+        _opset: usize,
+    ) -> Result<Option<InputPreferences>, ProcessError> {
+        if node.inputs.len() != 2 {
+            return Ok(None);
+        }
+
+        let mut prefs = InputPreferences::new();
+
+        // When one input is on_device and the other is a scalar, prefer ScalarNative.
+        // This uses the more efficient `_elem` comparison methods and avoids dtype
+        // mismatch between ScalarTensor constants (loaded with ONNX dtype) and tensors
+        // produced by runtime casts (which use the backend's default element type).
+        if node.inputs[0].ty.is_on_device() && node.inputs[1].ty.is_scalar() {
+            prefs = prefs.add(&node.inputs[1].name, ArgPreference::ScalarNative);
+        }
+        if node.inputs[1].ty.is_on_device() && node.inputs[0].ty.is_scalar() {
+            prefs = prefs.add(&node.inputs[0].name, ArgPreference::ScalarNative);
+        }
+
+        // When one input is ScalarNative and the other is also a scalar, prefer
+        // the other as ScalarNative too (avoids promoting to ScalarTensor).
+        if node.inputs[0].ty.is_scalar_native() && node.inputs[1].ty.is_scalar() {
+            prefs = prefs.add(&node.inputs[1].name, ArgPreference::ScalarNative);
+        }
+        if node.inputs[1].ty.is_scalar_native() && node.inputs[0].ty.is_scalar() {
+            prefs = prefs.add(&node.inputs[0].name, ArgPreference::ScalarNative);
+        }
+
+        Ok(Some(prefs))
+    }
+
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // Validate opset based on operation type (individual validation for specific ops)
+        let min_opset = match node.node_type {
+            crate::ir::NodeType::Equal => 1,
+            crate::ir::NodeType::Greater | crate::ir::NodeType::Less => 1,
+            crate::ir::NodeType::GreaterOrEqual | crate::ir::NodeType::LessOrEqual => 12,
+            _ => unreachable!(
+                "ComparisonProcessor should only be called for comparison operations, got: {:?}",
+                node.node_type
+            ),
+        };
+
+        if opset < min_opset {
+            return Err(ProcessError::UnsupportedOpset {
+                required: min_opset,
+                actual: opset,
+            });
+        }
+
+        node.outputs[0].ty = crate::processor::broadcast_output_type(
+            &node.inputs,
+            Some(DType::Bool(BoolStore::Native)),
+        );
+
+        Ok(())
+    }
+
+    fn build_node(&self, builder: RawNode, _opset: usize) -> Node {
+        match builder.node_type {
+            crate::ir::NodeType::Equal => Node::Equal(EqualNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            crate::ir::NodeType::Greater => Node::Greater(GreaterNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            crate::ir::NodeType::GreaterOrEqual => Node::GreaterOrEqual(GreaterOrEqualNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            crate::ir::NodeType::Less => Node::Less(LessNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            crate::ir::NodeType::LessOrEqual => Node::LessOrEqual(LessOrEqualNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            _ => panic!("ComparisonProcessor called with unsupported node type"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{ArgType, NodeType};
+    use crate::node::test_utils::TestNodeBuilder;
+
+    fn create_test_node(input1_rank: usize, input2_rank: usize) -> RawNode {
+        TestNodeBuilder::new(NodeType::Equal, "test_comparison")
+            .input_tensor_f32("A", input1_rank, None)
+            .input_tensor_f32("B", input2_rank, None)
+            .output_tensor_bool("result", 0, None) // rank will be updated
+            .build()
+    }
+
+    #[test]
+    fn test_comparison_rank_broadcasting() {
+        let mut node = create_test_node(2, 3);
+
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, DType::Bool(BoolStore::Native));
+                assert_eq!(tensor.rank, 3); // max(2, 3) = 3
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_comparison_scalar_result() {
+        let mut node = create_test_node(0, 0);
+
+        // Convert inputs to scalars
+        node.inputs[0].ty = ArgType::ScalarNative(DType::F32);
+        node.inputs[1].ty = ArgType::ScalarNative(DType::F32);
+
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::ScalarNative(elem_type) => {
+                assert_eq!(*elem_type, DType::Bool(BoolStore::Native));
+            }
+            _ => panic!("Expected scalar output"),
+        }
+    }
+
+    #[test]
+    fn test_comparison_with_shape_and_tensor() {
+        let mut node = create_test_node(2, 2);
+        node.inputs[0].ty = ArgType::Shape(3);
+        // node.inputs[1] remains as Tensor with rank 2
+
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, DType::Bool(BoolStore::Native));
+                assert_eq!(tensor.rank, 2); // max(1, 2) = 2 (Shape is rank 1, Tensor is rank 2)
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_comparison_both_shape_inputs() {
+        let mut node = create_test_node(0, 0);
+        node.inputs[0].ty = ArgType::Shape(3);
+        node.inputs[1].ty = ArgType::Shape(3);
+
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Shape(dim) => {
+                assert_eq!(*dim, 3); // Shape output with same dimension
+            }
+            _ => panic!("Expected shape output"),
+        }
+    }
+
+    #[test]
+    fn test_equal_opset_7() {
+        let mut node = TestNodeBuilder::new(NodeType::Equal, "test_equal")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+
+        // Should work with opset 7
+        assert!(processor.infer_types(&mut node, 7, &prefs).is_ok());
+
+        // Should also work with opset 1
+        let mut node = TestNodeBuilder::new(NodeType::Equal, "test_equal")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 1, &prefs).is_ok());
+    }
+
+    #[test]
+    fn test_greater_less_opset_7() {
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+
+        // Test Greater with opset 7
+        let mut node = TestNodeBuilder::new(NodeType::Greater, "test_greater")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 7, &prefs).is_ok());
+
+        // Test Less with opset 7
+        let mut node = TestNodeBuilder::new(NodeType::Less, "test_less")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 7, &prefs).is_ok());
+
+        // Should also work with opset 1
+        let mut node = TestNodeBuilder::new(NodeType::Greater, "test_greater")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 1, &prefs).is_ok());
+    }
+
+    #[test]
+    fn test_input_preferences_tensor_and_scalar_tensor() {
+        let mut node = create_test_node(2, 2);
+        // Make the second input a ScalarTensor (on-device scalar)
+        node.inputs[1].ty = ArgType::ScalarTensor(DType::F32);
+
+        let processor = ComparisonProcessor;
+        let prefs = processor.input_preferences(&node, 16).unwrap().unwrap();
+
+        // Tensor + ScalarTensor: scalar should get ScalarNative preference
+        let b_prefs = prefs.get("B");
+        assert_eq!(b_prefs.len(), 1);
+        assert!(matches!(b_prefs[0], ArgPreference::ScalarNative));
+
+        // Tensor input should not get any preference
+        let a_prefs = prefs.get("A");
+        assert!(a_prefs.is_empty());
+    }
+
+    #[test]
+    fn test_input_preferences_two_tensors() {
+        let node = create_test_node(2, 2);
+
+        let processor = ComparisonProcessor;
+        let prefs = processor.input_preferences(&node, 16).unwrap().unwrap();
+
+        // Two tensors: no preferences should be set
+        assert!(prefs.get("A").is_empty());
+        assert!(prefs.get("B").is_empty());
+    }
+
+    #[test]
+    fn test_input_preferences_scalar_native_and_scalar_tensor() {
+        let mut node = create_test_node(2, 2);
+        node.inputs[0].ty = ArgType::ScalarNative(DType::F32);
+        node.inputs[1].ty = ArgType::ScalarTensor(DType::F32);
+
+        let processor = ComparisonProcessor;
+        let prefs = processor.input_preferences(&node, 16).unwrap().unwrap();
+
+        // ScalarNative + ScalarTensor: the ScalarTensor should get ScalarNative preference
+        let b_prefs = prefs.get("B");
+        assert!(
+            b_prefs
+                .iter()
+                .any(|p| matches!(p, ArgPreference::ScalarNative))
+        );
+    }
+
+    #[test]
+    fn test_greater_or_equal_less_or_equal_opset_12() {
+        let processor = ComparisonProcessor;
+        let prefs = OutputPreferences::new();
+
+        // Test GreaterOrEqual with opset 12
+        let mut node = TestNodeBuilder::new(NodeType::GreaterOrEqual, "test_gte")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 12, &prefs).is_ok());
+
+        // Test LessOrEqual with opset 12
+        let mut node = TestNodeBuilder::new(NodeType::LessOrEqual, "test_lte")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 12, &prefs).is_ok());
+
+        // Should fail with opset 11
+        let mut node = TestNodeBuilder::new(NodeType::GreaterOrEqual, "test_gte")
+            .input_tensor_f32("A", 2, None)
+            .input_tensor_f32("B", 2, None)
+            .output_tensor_bool("result", 0, None)
+            .build();
+        assert!(processor.infer_types(&mut node, 11, &prefs).is_err());
+    }
+}

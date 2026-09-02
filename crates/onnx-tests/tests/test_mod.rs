@@ -1,0 +1,230 @@
+#![no_std]
+#![allow(
+    clippy::approx_constant,
+    clippy::excessive_precision,
+    clippy::identity_op,
+    clippy::bool_assert_comparison
+)]
+
+extern crate alloc;
+
+mod backend;
+
+// Import individual node modules
+pub mod abs;
+pub mod acos;
+pub mod acosh;
+pub mod add;
+pub mod and;
+pub mod argmax;
+pub mod argmin;
+pub mod asin;
+pub mod asinh;
+pub mod atan;
+pub mod atanh;
+pub mod attention;
+pub mod avg_pool;
+pub mod batch_norm;
+pub mod bernoulli;
+pub mod bitshift;
+pub mod bitwise_and;
+pub mod bitwise_not;
+pub mod bitwise_or;
+pub mod bitwise_xor;
+pub mod blackman_window;
+pub mod cast;
+pub mod cast_like;
+pub mod ceil;
+pub mod celu;
+pub mod clip;
+pub mod col2im;
+pub mod concat;
+pub mod constant;
+pub mod constant_lifting_multiple;
+pub mod constant_of_shape;
+pub mod conv;
+pub mod conv_transpose;
+pub mod cos;
+pub mod cosh;
+pub mod cumsum;
+pub mod custom_ops;
+pub mod deform_conv;
+pub mod depth_to_space;
+pub mod dequantize_linear;
+pub mod det;
+pub mod dft;
+pub mod div;
+pub mod dropout;
+pub mod einsum;
+pub mod elu;
+pub mod empty_graph;
+pub mod equal;
+pub mod erf;
+pub mod exp;
+pub mod expand;
+pub mod eye_like;
+pub mod flatten;
+pub mod floor;
+pub mod gather;
+pub mod gather_elements;
+pub mod gathernd;
+pub mod gelu;
+pub mod gemm;
+pub mod global_avr_pool;
+pub mod global_lp_pool;
+pub mod graph_multiple_output_tracking;
+pub mod greater;
+pub mod greater_or_equal;
+pub mod grid_sample;
+pub mod group_norm;
+pub mod gru;
+pub mod hamming_window;
+pub mod hann_window;
+pub mod hard_sigmoid;
+pub mod hard_swish;
+pub mod hardmax;
+pub mod identity;
+pub mod if_op;
+pub mod imputer;
+pub mod initializer_to_const;
+pub mod instance_norm;
+pub mod is_inf;
+pub mod is_nan;
+pub mod layer_norm;
+pub mod leaky_relu;
+pub mod less;
+pub mod less_or_equal;
+pub mod linear;
+pub mod log;
+pub mod log_softmax;
+pub mod r#loop;
+pub mod lp_normalization;
+pub mod lp_pool;
+pub mod lrn;
+pub mod lstm;
+pub mod matmul;
+pub mod matmulinteger;
+pub mod max;
+pub mod maxpool;
+pub mod mean;
+pub mod mean_variance_normalization;
+pub mod mel_weight_matrix;
+pub mod min;
+pub mod mish;
+pub mod r#mod;
+pub mod mul;
+pub mod neg;
+pub mod nonzero;
+pub mod not;
+pub mod one_hot;
+pub mod or;
+pub mod pad;
+pub mod pow;
+pub mod prelu;
+pub mod qlinear_matmul;
+pub mod quantize_linear;
+pub mod random_normal;
+pub mod random_normal_like;
+pub mod random_uniform;
+pub mod random_uniform_like;
+pub mod range;
+pub mod recip;
+pub mod reduce;
+pub mod relu;
+pub mod reshape;
+pub mod resize;
+pub mod rnn;
+pub mod round;
+pub mod scaler;
+pub mod scan;
+pub mod scatter_elements;
+pub mod scatter_nd;
+pub mod selu;
+pub mod shape;
+pub mod shrink;
+pub mod sigmoid;
+pub mod sign;
+pub mod simplify;
+pub mod sin;
+pub mod sinh;
+pub mod size;
+pub mod slice;
+pub mod softmax;
+pub mod softplus;
+pub mod softsign;
+pub mod space_to_depth;
+pub mod split;
+pub mod sqrt;
+pub mod squeeze;
+pub mod stft;
+pub mod sub;
+pub mod subgraph;
+pub mod sum;
+pub mod svmregressor;
+pub mod swish;
+pub mod tan;
+pub mod tanh;
+pub mod thresholded_relu;
+pub mod tile;
+pub mod topk;
+pub mod transpose;
+pub mod trilu;
+pub mod unsqueeze;
+pub mod upsample;
+pub mod where_op;
+pub mod xor;
+
+/// Include specified models in the `model` directory in the target directory.
+#[macro_export]
+macro_rules! include_models {
+    ($($model:ident),*) => {
+        $(
+            // Allow type complexity for generated code
+            #[allow(clippy::type_complexity)]
+            pub mod $model {
+                include!(concat!(env!("OUT_DIR"), concat!("/model/", stringify!($model), ".rs")));
+            }
+        )*
+    };
+}
+
+/// Include models from both `model_simplified/` and `model_unsimplified/` directories.
+///
+/// Also generates `simplified_source::<model>()` and `unsimplified_source::<model>()`
+/// functions returning the generated source code as `&'static str` for snapshot testing.
+#[macro_export]
+macro_rules! include_simplified_models {
+    ($($model:ident),*) => {
+        pub mod simplified {
+            $(
+                #[allow(clippy::type_complexity)]
+                pub mod $model {
+                    include!(concat!(env!("OUT_DIR"), "/model_simplified/", stringify!($model), ".rs"));
+                }
+            )*
+        }
+        pub mod unsimplified {
+            $(
+                #[allow(clippy::type_complexity)]
+                pub mod $model {
+                    include!(concat!(env!("OUT_DIR"), "/model_unsimplified/", stringify!($model), ".rs"));
+                }
+            )*
+        }
+
+        pub mod simplified_source {
+            $(
+                pub fn $model() -> &'static str {
+                    include_str!(concat!(env!("OUT_DIR"), "/model_simplified/", stringify!($model), ".rs"))
+                }
+            )*
+        }
+        pub mod unsimplified_source {
+            $(
+                pub fn $model() -> &'static str {
+                    include_str!(concat!(env!("OUT_DIR"), "/model_unsimplified/", stringify!($model), ".rs"))
+                }
+            )*
+        }
+    };
+}

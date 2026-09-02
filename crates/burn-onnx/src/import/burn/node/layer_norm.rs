@@ -1,0 +1,143 @@
+use burn_pack::Tensor as PackTensor;
+
+use super::prelude::*;
+
+impl NodeCodegen for onnx_ir::node::layer_norm::LayerNormalizationNode {
+    fn inputs(&self) -> &[Argument] {
+        &self.inputs
+    }
+
+    fn outputs(&self) -> &[Argument] {
+        &self.outputs
+    }
+
+    fn field(&self) -> Option<Field> {
+        let name = Ident::new(&self.name, Span::call_site());
+        let scale_shape = self.inputs[1]
+            .ty
+            .static_shape_known()
+            .expect("LayerNorm: scale tensor shape must be known at codegen time");
+        let num_features = scale_shape[0].to_tokens();
+        let epsilon = self.config.epsilon;
+        let has_bias = self.inputs.len() > 2;
+
+        Some(Field::new(
+            self.name.clone(),
+            quote! {
+                LayerNorm
+            },
+            quote! {
+                let #name = LayerNormConfig::new(#num_features)
+                    .with_epsilon(#epsilon)
+                    .with_bias(#has_bias)
+                    .init(device);
+            },
+        ))
+    }
+
+    fn collect_tensors(&self, field_name: &str) -> Vec<PackTensor> {
+        use crate::burn::node_traits::create_deferred_tensor;
+
+        let mut tensors = vec![];
+
+        // Gamma (scale) tensor at input index 1
+        if let Some(gamma_input) = self.inputs.get(1) {
+            let gamma_path = format!("{}.gamma", field_name);
+            if let Some(tensor) = create_deferred_tensor(gamma_input, &gamma_path) {
+                tensors.push(tensor);
+            }
+        }
+
+        // Beta (bias) tensor at input index 2 - only if present
+        if self.inputs.len() > 2
+            && let Some(beta_input) = self.inputs.get(2)
+        {
+            let beta_path = format!("{}.beta", field_name);
+            if let Some(tensor) = create_deferred_tensor(beta_input, &beta_path) {
+                tensors.push(tensor);
+            }
+        }
+        // When bias is absent, Burn's LayerNorm is configured with .with_bias(false),
+        // so no beta parameter exists and no tensor is needed
+
+        tensors
+    }
+
+    fn forward(&self, scope: &mut ScopeAtPosition<'_>) -> TokenStream {
+        let input = scope.arg(self.inputs.first().unwrap());
+        let output = arg_to_ident(self.outputs.first().unwrap());
+        let field = Ident::new(&self.name, Span::call_site());
+
+        if self.config.full_precision {
+            quote! {
+                let #output = {
+                    let dtype = #input.dtype();
+                    self.#field.forward(#input.cast(burn::tensor::DType::F32)).cast(dtype)
+                };
+            }
+        } else {
+            quote! {
+                let #output = self.#field.forward(#input);
+            }
+        }
+    }
+
+    fn register_imports(&self, imports: &mut BurnImports) {
+        imports.register("burn::nn::LayerNorm");
+        imports.register("burn::nn::LayerNormConfig");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::*;
+    use burn::tensor::DType;
+    use insta::assert_snapshot;
+    use onnx_ir::node::layer_norm::{
+        LayerNormConfig, LayerNormalizationNode, LayerNormalizationNodeBuilder,
+    };
+
+    fn create_layer_norm_node(name: &str) -> LayerNormalizationNode {
+        let config = LayerNormConfig::new(1e-5, true);
+
+        LayerNormalizationNodeBuilder::new(name)
+            .input_tensor("input", 3, DType::F32)
+            .input_static_tensor_shape("scale", vec![512], DType::F32)
+            .input_static_tensor_shape("bias", vec![512], DType::F32)
+            .output_tensor("output", 3, DType::F32)
+            .config(config)
+            .build()
+    }
+
+    #[test]
+    fn test_layer_norm_forward() {
+        let node = create_layer_norm_node("layer_norm1");
+        let code = codegen_forward_default(&node);
+        assert_snapshot!(code, @r"
+        pub fn forward(&self, input: Tensor<3>) -> Tensor<3> {
+            let output = {
+                let dtype = input.dtype();
+                self.layer_norm1.forward(input.cast(burn::tensor::DType::F32)).cast(dtype)
+            };
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_layer_norm_forward_with_clone() {
+        let node = create_layer_norm_node("layer_norm1");
+        let code = codegen_forward_with_clone(&node);
+        assert_snapshot!(code, @r"
+        pub fn forward(&self, input: Tensor<3>) -> Tensor<3> {
+            let output = {
+                let dtype = input.clone().dtype();
+                self.layer_norm1
+                    .forward(input.clone().cast(burn::tensor::DType::F32))
+                    .cast(dtype)
+            };
+            output
+        }
+        ");
+    }
+}

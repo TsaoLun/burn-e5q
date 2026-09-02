@@ -1,0 +1,1137 @@
+# ONNX to Burn: Development Guide
+
+This guide offers in-depth design insights and step-by-step procedures for developers working on the
+ONNX to Burn conversion tool. This tool allows the importation of ONNX models into the Burn deep
+learning framework written in Rust. It converts ONNX models to Rust source code and model weights to
+`.bpk` files.
+
+For an introduction to ONNX import in Burn, see
+[this section of the Burn book](https://burn.dev/books/burn/import/onnx-model.html). Before opening a
+PR, please read the [Contributing Guidelines](CONTRIBUTING.md).
+
+## Design Overview
+
+### Design Goals
+
+- Perform best-effort conversion of ONNX models to Rust source code via Burn APIs.
+- Convert ONNX model weights to Burn state files.
+- Support ONNX models from all opset versions (1 through 24) for every supported operator.
+- Produce easy-to-understand and modifiable models.
+- Ensure the generated models are trainable using Burn APIs.
+
+### Design Decisions
+
+**Core Principles:**
+
+- **Op/Node-Centric Design**: Built around individual operations and nodes for better scalability as
+  more operators are added
+- **Opset-Aware Processing**: Processors accept opset parameters for flexible behavior across
+  different ONNX versions
+- **Constants-First Approach**: All ONNX initializers are treated as constant nodes initially,
+  providing a uniform starting point
+- **Native Type Integration**: Direct use of `burn_tensor::TensorData` and `Dtype` for efficiency,
+  consistency, and future mmap support
+- **Multi-Phase Pipeline**: Explicit transformation phases (initialization → conversion → type
+  inference → post-processing → finalization) for better visibility and maintainability
+- **Graph Input Name Preservation**: Sanitized ONNX names are preserved for easier development and
+  troubleshooting
+
+**Separation of Concerns:**
+
+- Limit interaction with ONNX to the Intermediate Representation (IR) stage to simplify the process
+- Ensure operator behavior consistency across different OpSet versions
+- Exclude any ONNX/Protobuf-specific logic from the Burn graph
+- **Feature Support Validation**: The [`onnx-ir`](crates/onnx-ir/) crate should extract and preserve
+  all ONNX attributes faithfully, even if Burn does not yet support them. Rejection of unsupported
+  features should happen in [`burn-onnx`](crates/burn-onnx/) during code generation, not in
+  `onnx-ir` during configuration extraction. This allows `onnx-ir` to be reused by other projects
+  that may have different feature support
+- **No `panic!` in codegen**: Structural validation (e.g., "only 1D/2D supported, got 3D") should
+  use `ProcessError` in onnx-ir's `infer_types` or `extract_config`, not `panic!` in burn-onnx
+  codegen. Panics in codegen produce poor error messages and crash the build process
+
+The conversion process involves three main stages:
+
+1. Convert ONNX model to Intermediate Representation (IR) via 5-phase pipeline.
+2. Translate IR to a Burn graph.
+3. Generate Rust source code from the Burn graph.
+
+## Adding New Operators
+
+To extend `burn-onnx` with support for new ONNX operators, follow these steps:
+
+1. **Create PyTorch Script**: Place a PyTorch script using the new operator under
+   `crates/onnx-tests/tests/<op>/<op>.py`. Make sure to print both input and output tensors for
+   end-to-end testing.
+
+2. **Generate ONNX Model**: Run the PyTorch script to produce an ONNX model.
+
+3. **Visualize ONNX Model**: Use [Netron](https://github.com/lutzroeder/netron) to verify the ONNX
+   model contains the expected operators.
+
+4. **Generate IR and Burn Graph**: Run from the repository root:
+
+   ```
+   cargo run -p burn-onnx --bin onnx2burn -- crates/onnx-tests/tests/<op>/<op>.onnx ./out
+   ```
+
+5. **Implement Missing Operators**: If you encounter an error stating that an operator is
+   unsupported, [implement it](#implementing-a-new-operator). The `./out/my-model.graph.txt` should
+   provide relevant information.
+
+6. **Inspect Generated Files**: The `my-model.graph.txt` contains IR details, `my-model.rs` holds
+   the Burn model in Rust code, and `my-model.bpk` contains the model weights.
+
+7. **Integration Test**: Include the test in the `tests/<op_name>/mod.rs` file in the
+   [crates/onnx-tests/tests/](crates/onnx-tests/tests/) directory. Further details can be found in
+   the [onnx-tests README](crates/onnx-tests/README.md).
+
+## Implementing a New Operator
+
+To extend the capabilities of the Burn library by supporting new operations imported from ONNX
+graphs, developers must go through a few systematic steps. Here, we detail the process, using the
+implementation of the `Squeeze` operation to illustrate points as needed. All file/directory paths
+are relative to the root of the burn-onnx repository.
+
+### Step 1: Node Processor Implementation in onnx-ir
+
+The [`onnx-ir`](crates/onnx-ir/) crate handles the Intermediate Representation (IR) of ONNX models
+using a processor-based architecture. For each operation:
+
+1. **Create a node module** in `crates/onnx-ir/src/node/<operation_name>.rs`. This file should
+   contain:
+   - **Configuration struct**: Define operation-specific parameters (e.g., `SqueezeConfig`).
+     **Important**: Include ALL ONNX operator attributes, even if burn-onnx doesn't use them yet.
+     Use `Option<T>` for optional attributes.
+   - **Processor struct**: Implement `NodeProcessor` trait (marked as `pub(crate)`)
+   - The processor handles:
+     - **Input/output specification**: Define expected inputs and outputs via `NodeSpec`
+     - **Type inference**: Infer output types from inputs and configuration
+     - **Configuration extraction**: Extract ALL operation parameters from ONNX attributes
+     - **Node construction**: Build the final `Node` enum variant with config
+
+2. **Make the module visible** in `crates/onnx-ir/src/node/mod.rs`:
+
+   ```rust
+   pub mod squeeze;
+   ```
+
+3. **Create a node struct** in your module file (e.g., `squeeze.rs`) with the standard fields:
+
+   ```rust
+   use onnx_ir_derive::NodeBuilder;
+
+   #[derive(Debug, Clone, NodeBuilder)]
+   pub struct SqueezeNode {
+       pub name: String,
+       pub inputs: Vec<Argument>,
+       pub outputs: Vec<Argument>,
+       pub config: SqueezeConfig,
+   }
+   ```
+
+   The `NodeBuilder` derive macro generates a test builder (e.g., `SqueezeNodeBuilder`) with methods
+   for constructing nodes in tests.
+
+4. **Add to the macro invocation** in `crates/onnx-ir/src/ir/node.rs` by adding a mapping to the
+   `define_node_enum!` macro:
+
+   ```rust
+   define_node_enum! {
+       // ... other variants
+       Squeeze => squeeze::SqueezeNode,
+       // ... more variants
+   }
+   ```
+
+   This single macro invocation generates both the `NodeType` enum (for parsing) and the `Node` enum
+   (with tuple variants wrapping node structs) from a single source of truth.
+
+5. **Register your processor** in `crates/onnx-ir/src/registry.rs` by adding it to the
+   `with_standard_processors()` function:
+   ```rust
+   registry.register("Squeeze", Box::new(squeeze::SqueezeProcessor));
+   ```
+
+For example, the squeeze operation in `crates/onnx-ir/src/node/squeeze.rs` contains:
+
+- A `SqueezeConfig` struct with operation parameters (axes)
+- A `SqueezeProcessor` struct (marked `pub(crate)`) that implements `NodeProcessor`
+- The `spec()` method defines input/output requirements
+- The `build_node()` method extracts config and constructs the `Node::Squeeze` variant
+
+### Step 2: Code Generation in burn-onnx
+
+1. Create a new file named `<operation_name>.rs` in the `crates/burn-onnx/src/import/burn/node/` directory.
+   This file implements code generation for your operation by implementing the `NodeCodegen` trait
+   directly on the onnx-ir node type.
+
+2. Implement the `NodeCodegen` trait for the onnx-ir node type. This trait defines how the node
+   generates Rust code during the graph compilation process:
+
+   ```rust
+   use super::prelude::*;
+
+   impl NodeCodegen for onnx_ir::squeeze::SqueezeNode {
+       fn inputs(&self) -> &[Argument] {
+           &self.inputs
+       }
+
+       fn outputs(&self) -> &[Argument] {
+           &self.outputs
+       }
+
+       fn forward(&self, scope: &mut ScopeAtPosition<'_>) -> TokenStream {
+           let input_arg = self.inputs.first().unwrap();
+           let output_arg = self.outputs.first().unwrap();
+
+           // Use scope.arg() to handle Tensor/Scalar/Shape arguments automatically
+           let input = scope.arg(input_arg);
+           let output = arg_to_ident(output_arg);
+
+           // Access node configuration
+           match &self.config.axes {
+               Some(axes) => {
+                   let axes_values: Vec<_> = axes.iter().map(|&i| {
+                       proc_macro2::Literal::i64_suffixed(i)
+                   }).collect();
+                   quote! {
+                       let #output = #input.squeeze_dims(&[#(#axes_values),*]);
+                   }
+               }
+               None => {
+                   // Get output rank from type inference
+                   let output_rank = match &output_arg.ty {
+                       ArgType::Tensor(t) => t.rank,
+                       _ => panic!("Expected tensor output"),
+                   };
+                   quote! {
+                       let #output = #input.squeeze::<#output_rank>();
+                   }
+               }
+           }
+       }
+   }
+   ```
+
+   Key methods to implement:
+   - `inputs(&self)` - Returns references to input arguments (usually just `&self.inputs`)
+   - `outputs(&self)` - Returns references to output arguments (usually just `&self.outputs`)
+   - `forward(&self, scope)` - Generates Rust code for the operation using the `quote!` macro
+   - `field(&self)` - (Optional) Declares module fields for parameters like weights
+   - `collect_tensors(&self, field_name)` - (Optional) Collects deferred tensors for burnpack
+     serialization
+
+3. Use helper utilities from `argument_helpers.rs`:
+   - `scope.arg(argument)` - Use for all inputs. Handles clone tracking for on-device values
+     (`Tensor`, `ScalarTensor`) and returns bare idents for host values (`ScalarNative`, `Shape`)
+   - `arg_to_ident(argument)` - Converts argument name to an identifier. Use for output bindings and
+     host-side values only. Never use for `ScalarTensor` inputs (it skips clone tracking)
+
+   **Scalar type system**: ONNX scalar constants are represented as two `ArgType` variants:
+   - `ScalarTensor(DType)` - A `Tensor<1>` on device (rank 1). Default for scalar constants.
+     Participates in tensor arithmetic via broadcasting. Use `scope.arg()` to access
+   - `ScalarNative(DType)` - A native Rust scalar (`f32`, `i64`, etc., rank 0). Used for shape
+     computation, control flow conditions, array indices. Use `arg_to_ident()` to access
+
+   Nodes that need native scalars (e.g., Range, If, Loop, Slice) request `ArgPreference::ScalarNative`
+   via `input_preferences()` in their processor. Top-level graph I/O always uses `ScalarNative` so
+   user-facing function signatures are unchanged.
+
+4. **Prefer existing Burn tensor APIs over manual loops**: Before implementing an operator with
+   manual loops or per-element tensor operations in generated code, check the Burn tensor API for
+   existing operations that do the same thing (e.g., `scatter` with `IndexingUpdateOp::Add`,
+   `select_assign`, `unfold4d`). Native tensor operations are orders of magnitude faster than
+   generated element-wise loops. When no exact Burn API exists, prefer compositions of tensor
+   operations that stay on-device over approaches that move data between CPU and GPU (e.g.,
+   `.into_data()` / `.from_data()`), as each transfer is a synchronization point that kills
+   performance.
+
+5. Add unit tests using snapshot testing to verify the generated code. These tests typically use the
+   `insta` crate and test helper functions to validate the generated code:
+
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::super::test_helpers::*;
+       use insta::assert_snapshot;
+       use onnx_ir::squeeze::SqueezeNodeBuilder;
+
+       #[test]
+       fn test_squeeze_forward() {
+           let node = SqueezeNodeBuilder::new("squeeze1")
+               .input_tensor("input", 3, DType::F32)
+               .output_tensor("output", 2, DType::F32)
+               .axes(vec![1])
+               .build();
+           let code = codegen_forward_default(&node);
+           assert_snapshot!(code, @"let output = input.squeeze_dims(&[1i64]);");
+       }
+   }
+   ```
+
+### Step 3: Register in Module System
+
+Add the module declaration to `crates/burn-onnx/src/import/burn/node/mod.rs`:
+
+```rust
+// ... other node modules
+pub(crate) mod squeeze;
+// ... more node modules
+```
+
+The modules are automatically made visible through re-exports in the same file.
+
+### Step 4: Register in Code Generation Dispatch
+
+Add your operation to the dispatch macro in `crates/burn-onnx/src/import/burn/node_codegen.rs`. The
+`impl_node_codegen_dispatch!` macro generates the trait implementation that dispatches to your
+node-specific code.
+
+Add the node variant name (as defined in `onnx-ir`'s `Node` enum) to the macro invocation:
+
+```rust
+impl_node_codegen_dispatch! {
+    // ... other operations
+    Squeeze,  // Add your operation here (matches Node::Squeeze variant)
+    // ... more operations
+}
+```
+
+The macro automatically generates:
+
+- Dispatch implementation for `NodeCodegen<PS>` on `onnx_ir::Node`
+- All required trait methods (`inputs`, `outputs`, `forward`, `field`, etc.)
+- Pattern matching to route to your node-specific implementation
+
+### Step 5: Processor Implementation
+
+The `NodeProcessor` trait defines how operations are processed in onnx-ir. Each processor must
+implement:
+
+1. **Associated type**: `type Config` - Define your configuration struct (use `()` if no config)
+2. **`infer_types()`** - Infer output types from inputs and config (required)
+3. **`build_node()`** - Construct the node struct and wrap it in the `Node` enum variant (required)
+4. **`extract_config()`** - Extract config from attributes/inputs (override if Config != `()`)
+5. **`spec()`** - Define opset and input/output requirements (optional)
+6. **`lift_constants()`** - Request constant lifting for inputs (optional)
+7. **`is_noop()`** - Return `true` if the node is a no-op (optional, default `false`)
+
+**Important**: Processors should extract the attributes they need and ignore the rest. Do not iterate
+over all attributes to reject unknown ones, as ONNX may add new attributes in future opsets.
+
+Example `build_node()` implementation:
+
+```rust
+fn build_node(&self, builder: RawNode, opset: usize) -> Node {
+    let config = self.extract_config(&builder, opset).expect("Config extraction failed");
+    Node::Squeeze(SqueezeNode {
+        name: builder.name,
+        inputs: builder.inputs,
+        outputs: builder.outputs,
+        config,
+    })
+}
+```
+
+Note: `RawNode` is the intermediate node representation used during processing. The `build_node()`
+method converts it into the final typed `Node` enum variant.
+
+For complete examples, see existing processors:
+
+- **Simple operation**: `crates/onnx-ir/src/node/softmax.rs`
+- **With constant inputs**: `crates/onnx-ir/src/node/squeeze.rs`
+- **Complex operation**: `crates/onnx-ir/src/node/conv2d.rs`
+
+See [NodeProcessor Trait](#nodeprocessor-trait) for the complete trait definition.
+
+### Step 6: Add Newly Supported Op!
+
+As a reward, add an extra check to `SUPPORTED-ONNX-OPS.md`!
+
+### Constant Lifting
+
+The onnx-ir pipeline automatically handles constant lifting during the post-processing phase.
+"Lifting" constants means making constant values directly accessible on node inputs via
+`Argument::value()`, instead of requiring a separate graph traversal to find a Constant node.
+
+**When to use**: If your operation takes constant inputs (e.g., weights in Conv1d, shape tensors in
+Reshape, axes in Squeeze), access them via `node.inputs[N].value()` in your `extract_config()`
+method. See the [Configuration Extraction example](#example-configuration-extraction) in Step 5.
+
+**Optional optimization**: Implement `lift_constants()` to explicitly request constant lifting for
+specific inputs before `extract_config()` is called. The pipeline handles this automatically during
+post-processing.
+
+### Handling Optional ONNX Inputs
+
+ONNX uses an empty string `""` for "optional input not provided". The pipeline sets
+`ValueSource::Optional` on these inputs during parsing. Use `RawNode::get_input(index)` to access
+inputs safely: it returns `None` for both out-of-bounds and optional inputs.
+
+```rust
+// Good: returns None for absent or optional inputs
+if let Some(input) = node.get_input(2) {
+    // input is guaranteed to be a real, non-optional input
+    let value = input.value();
+}
+
+// Good: explicit is_optional() check when you need the index for mutation
+if node.inputs.len() > 1 && !node.inputs[1].is_optional() && node.inputs[1].is_constant() {
+    node.inputs[1].to_static()?;
+}
+
+// Bad: creates RuntimeInputRef with empty name, panics during codegen
+if let Some(input) = node.inputs.get(2) {
+    return Ok(SomeConfig::Runtime(RuntimeInputRef::new(input.name.clone(), 2)));
+}
+
+// Bad: unreliable after to_static() clears names
+if !node.inputs[0].name.is_empty() { ... }
+```
+
+**Key rules:**
+
+- Use `node.get_input(index)` in `extract_config()`, `is_noop()`, and read-only access
+- Use `!node.inputs[N].is_optional()` guards in `lift_constants()` (which needs `&mut` access)
+- Never check `name.is_empty()` to detect optional inputs; use `is_optional()` instead
+
+## Architecture Overview
+
+### ONNX-IR Pipeline
+
+The [`onnx-ir`](crates/onnx-ir/) crate converts ONNX models to an Intermediate Representation
+through a 5-phase pipeline:
+
+#### Phase 1: Initialization
+
+- Creates `GraphState` from ONNX proto structures
+- **Constants-first approach**: Converts all ONNX initializers into Constant nodes, providing a
+  uniform starting point for processing
+- Sets up the value store for tensor data using `burn_tensor::TensorData`
+- Preserves sanitized graph input names for debugging
+
+#### Phase 2: Node Conversion
+
+- Converts ONNX nodes to IR nodes using registered processors
+- Creates `RawNode` instances from ONNX proto nodes (intermediate representation)
+- Processors extract configuration and construct typed `Node` enum variants
+- Handles constant nodes specially (extracting values from attributes into tensor store)
+- Each processor is responsible for its own type inference and node construction
+
+#### Phase 3: Type Inference
+
+- Type inference happens within each processor's `process()` method during Phase 2
+- Processors infer output types based on input types and configuration
+- Multi-pass processing handles dependencies between nodes
+- The pipeline may need multiple iterations for complex type dependencies (e.g., control flow)
+
+#### Phase 4: Post-processing
+
+- Lifts constants: Makes constant values accessible on downstream node inputs
+- Eliminates no-op nodes: Removes nodes whose processor's `is_noop()` returns `true` (Identity,
+  same-type Cast, scalar Reshape, scalar Gather, etc.) and rewires the graph
+- Re-runs constant lifting after no-op elimination
+
+#### Phase 4b: Simplification (Optional)
+
+When `ModelGen::simplify(true)` is enabled, an additional simplification pass runs after
+post-processing. This pass folds shape-related computations into constants at codegen time:
+
+- **Shape folding**: `Shape(x)` with static dims becomes a constant array
+- **Gather on shape**: `Gather(Shape(x), const_idx)` becomes a scalar constant
+- **Slice on shape**: `Slice(Shape(x), start, end)` becomes a sub-array constant
+- **Concat of shapes**: `Concat(Shape(x), Shape(y))` becomes a concatenated constant
+- **Reshape from shape**: `Reshape(x, Shape(y))` uses a folded constant shape
+- **Binary ops on shapes**: `Add/Mul/Sub/Div(Shape(x), const)` becomes a constant
+- **Cast on shape**: `Cast(Shape(x))` becomes a constant
+- **Where on shapes**: `Where(cond, Shape(x), Shape(y))` becomes a conditional constant
+- **Expand from shape**: `Expand(x, Shape(y))` uses a folded constant shape
+- **ConstantOfShape optimization**: `ConstantOfShape(Shape(x))` uses a known shape
+
+Simplification is enabled by default. Existing operator tests explicitly use `.simplify(false)` when they need to test unsimplified codegen paths.
+Use `--no-simplify` to disable it:
+
+```sh
+cargo run -p burn-onnx --bin onnx2burn -- model.onnx ./out             # simplification enabled (default)
+cargo run -p burn-onnx --bin onnx2burn -- model.onnx ./out --no-simplify  # simplification disabled
+```
+
+Existing operator tests use `.simplify(false)` to test unsimplified codegen. Dedicated comparison
+tests in `crates/onnx-tests/tests/simplify/` verify that simplified and unsimplified codegen produce
+identical outputs.
+
+#### Phase 5: Finalization
+
+- Removes unreferenced constant nodes
+- Constructs the final `OnnxGraph` with inputs, outputs, and nodes
+
+### Submodule Partitioning
+
+Large models (>200 nodes) are automatically partitioned into `SubmoduleN` structs during code
+generation. Without partitioning, the generated `forward()` method becomes a single enormous
+function that takes very long to compile.
+
+The algorithm (in `crates/burn-onnx/src/import/burn/partition.rs`):
+
+1. **Constant reordering**: Moves each constant node to just before its first consumer. ONNX
+   exporters typically cluster constants at the top of the graph, which inflates cut widths at
+   early partition boundaries. Reordering ensures constants land in the same chunk as their
+   consumers and never appear in `forward()` signatures (they become struct fields instead).
+
+2. **Cut width computation**: A sweep-line algorithm computes the number of live values (tensors,
+   scalars, shapes) crossing each position in the node list. A narrow cut means few values need
+   to be passed between submodules.
+
+3. **Greedy partitioning**: Picks the narrowest cut in each window of `[MIN_CHUNK, MAX_CHUNK]`
+   nodes. If no acceptable cut exists in a window, it skips ahead rather than giving up.
+
+4. **Interface computation**: For each chunk, determines which values flow in (inputs to
+   `forward()`) and which flow out (return values).
+
+Constants: `MIN_GRAPH_SIZE=200`, `MIN_CHUNK=64`, `MAX_CHUNK=256`, `MAX_CUT_WIDTH=64`.
+
+The top-level `Model` struct contains `SubmoduleN` fields and chains their `forward()` calls.
+Weight paths are auto-prefixed (`submoduleN.field.weight`) for `load_from` routing. Small models
+take the flat codegen path with zero behavior change.
+
+Partitioning is enabled by default. Use `--no-partition` to disable it from the CLI, or `ModelGen::new().partition(false)` in a build script.
+
+### NodeProcessor Trait
+
+The `NodeProcessor` trait (defined in `crates/onnx-ir/src/processor.rs`) is the core abstraction for
+handling ONNX operations. Each processor implements:
+
+**Required:**
+
+- `type Config` - Associated type for configuration (use `()` if no config needed)
+- `infer_types()` - Infer output types from inputs and configuration
+- `build_node()` - Construct the final `Node` enum variant
+
+**Static Shape Inference:**
+
+The `infer_types()` method should always produce a `static_shape` (`Some(vec![...])`) on tensor
+outputs, even when the input has no static shape info. Use `None` for unknown individual dimensions
+and `Some(value)` for known ones. This enables downstream merging via `merge_static_shape()`.
+
+- **Always produce `Some(vec![...])`**, never leave `static_shape` as `None` when you know the
+  output rank. Start with `vec![None; rank]` and fill in whatever dimensions you can determine.
+- **Extract dimension info from all available sources**: input `static_shape`, weight tensor data
+  (via `node.inputs[N].value().map(|d| d.shape)`), weight `static_shape`, and operator config.
+- **Use `unwrap_or_else`** instead of `.map()` on input static shape to avoid short-circuiting:
+  ```rust
+  // Good: always produces partial shape
+  let mut shape = tensor.static_shape.clone()
+      .unwrap_or_else(|| vec![None; tensor.rank]);
+  shape[1] = Some(out_channels); // fill in what we know
+  Some(shape)
+
+  // Bad: returns None entirely when input has no static_shape
+  tensor.static_shape.as_ref().map(|s| { ... })
+  ```
+
+**Optional (have defaults):**
+
+- `spec()` - Define opset requirements and input/output count validation (`NodeSpec`, `InputSpec`,
+  `OutputSpec`)
+- `extract_config()` - Extract configuration from attributes/inputs (default returns
+  `Default::default()`)
+- `lift_constants()` - Request constant lifting for specific inputs (default does nothing)
+- `input_preferences()` - Declare preferred input types from producers (default returns `None`).
+  Use `ArgPreference::ScalarNative` for inputs that must be native Rust scalars (control flow
+  conditions, shape indices, arange bounds). Use `ArgPreference::Shape` for inputs that should be
+  shape arrays. Scalar constants default to `ScalarTensor` (on-device) unless a consumer requests
+  otherwise
+- `is_noop()` - Return `true` if this node is a no-op after type inference, causing it to be
+  eliminated during post-processing (default returns `false`)
+
+Design principles: Each processor is self-contained, handling type inference, config extraction, and
+node construction. Processors return strongly-typed `Node` enum variants, ensuring type safety
+throughout the pipeline.
+
+**Error formatting**: `ProcessError` has a `Display` impl for user-facing messages. Use `{}` (not
+`{:?}`) when formatting errors to avoid exposing Rust variant names like `Custom("...")` to users.
+
+## Testing
+
+When implementing a new operator, there are several levels of testing to consider:
+
+### Unit Testing
+
+- **Processor Methods**: Write unit tests in `crates/onnx-ir/src/node/<operation_name>.rs` to
+  verify:
+  - `extract_config()` - Correctly extracts configuration from attributes and inputs
+  - `infer_types()` - Correctly infers output types (element type, rank, static shapes)
+  - `build_node()` - Constructs correct `Node` enum variant
+  - `spec()` - Defines correct opset and input/output requirements
+  - Error handling for invalid inputs or configurations
+
+  See existing tests in `crates/onnx-ir/src/node/squeeze.rs` for examples.
+
+- **Code Generation**: Test the burn-onnx Node implementation to verify correct Rust code
+  generation. Use `insta` snapshot tests to cover as many code generation branches as possible:
+  - Each configuration option (e.g., different axis values, padding modes)
+  - Each input type variant (tensor, scalar, shape)
+  - Optional vs required inputs
+  - Different tensor ranks and data types
+  - Edge cases that trigger different code paths
+  - **Use inline snapshots only**: Use `assert_snapshot!(code, @r"...")` with embedded expected
+    output, not external `.snap` files
+
+### Integration Testing
+
+Integration tests are located in [`crates/onnx-tests/`](crates/onnx-tests/) and verify end-to-end
+conversion from ONNX models to Burn source code.
+
+#### Directory Structure
+
+- `tests/<op_name>/`: Each operator has its own directory
+- `tests/<op_name>/<op_name>.py`: Python script that generates the ONNX model
+- `tests/<op_name>/<op_name>.onnx`: Generated ONNX model
+- `tests/<op_name>/mod.rs`: Test implementation for the operator
+
+#### Python Script Format
+
+Use [`uv`](https://docs.astral.sh/uv/) inline script format for self-contained test scripts:
+
+```python
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# dependencies = [
+#   "onnx==1.19.0",
+#   "torch==2.1.1",
+# ]
+# ///
+
+import torch
+import onnx
+# ... rest of script
+```
+
+This makes scripts executable without manual environment setup.
+
+#### Creating a Test for a New Operator
+
+There are two approaches to generating ONNX files:
+
+**Approach 1: Exporting a PyTorch Model** (most common)
+
+```python
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# dependencies = [
+#   "onnx==1.19.0",
+#   "torch==2.1.1",
+# ]
+# ///
+
+import torch
+import torch.nn as nn
+from onnx.reference import ReferenceEvaluator
+import onnx
+
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return my_operation(x)
+
+model = MyModel()
+torch.manual_seed(42)
+input_tensor = torch.randn(1, 3, 224, 224)
+
+torch.onnx.export(
+    model,
+    input_tensor,
+    "tests/my_new_op/my_new_op.onnx",
+    opset_version=16,
+    input_names=["input"],
+    output_names=["output"],
+    do_constant_folding=False  # Preserve operators
+)
+
+# Verify with ONNX ReferenceEvaluator (ground truth)
+onnx_model = onnx.load("tests/my_new_op/my_new_op.onnx")
+ref = ReferenceEvaluator(onnx_model)
+outputs = ref.run(None, {"input": input_tensor.numpy()})
+
+print("Input:", input_tensor)
+print("Expected output:", outputs[0])
+```
+
+**Approach 2: Constructing ONNX Graph Directly**
+
+Useful when you need precise control over operator attributes:
+
+```python
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# dependencies = [
+#   "onnx==1.19.0",
+#   "numpy",
+# ]
+# ///
+
+import numpy as np
+import onnx
+from onnx import TensorProto, helper
+from onnx.reference import ReferenceEvaluator
+
+np.random.seed(42)
+data = np.random.randn(5, 5, 5).astype(np.float32)
+indices = np.array([0, 2, 4], dtype=np.int64)
+
+node = helper.make_node("Gather", inputs=["data", "indices"], outputs=["output"], axis=1)
+
+data_tensor = helper.make_tensor_value_info("data", TensorProto.FLOAT, data.shape)
+indices_tensor = helper.make_tensor_value_info("indices", TensorProto.INT64, indices.shape)
+output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [5, 3, 5])
+
+graph = helper.make_graph([node], "gather-model", [data_tensor, indices_tensor], [output_tensor])
+model = helper.make_model(graph)
+onnx.save(model, "tests/my_new_op/my_new_op.onnx")
+
+# Verify with ONNX ReferenceEvaluator (ground truth)
+ref = ReferenceEvaluator(model)
+outputs = ref.run(None, {"data": data, "indices": indices})
+
+print("Data:", data)
+print("Indices:", indices)
+print("Expected output:", outputs[0])
+```
+
+#### Using ReferenceEvaluator
+
+Always use `onnx.reference.ReferenceEvaluator` to compute expected outputs. This is the official
+ONNX reference implementation and serves as ground truth for verifying Burn's output matches.
+
+#### Creating the Rust Test
+
+Create `tests/my_new_op/mod.rs`:
+
+```rust
+use crate::include_models;
+include_models!(my_new_op);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burn::tensor::{Shape, Tensor};
+
+    #[test]
+    fn my_new_op() {
+        let device = Default::default();
+        let model = my_new_op::Model::new(&device);
+
+        let input = Tensor::ones([1, 3, 224, 224], &device);
+        let output = model.forward(input);
+
+        // Compare against expected values from ReferenceEvaluator
+        let expected_shape = Shape::from([1, 3, 224, 224]);
+        assert_eq!(expected_shape, output.shape());
+    }
+}
+```
+
+Register the test module in `tests/test_mod.rs`:
+
+```rust
+pub mod my_new_op;
+```
+
+#### Running Tests
+
+```sh
+# Default backend (Flex)
+cargo test
+
+# WGPU backend
+cargo test --features test-wgpu
+
+# LibTorch backend
+cargo test --features test-tch
+
+# Specific test
+cargo test --test test_mod my_new_op::test_my_new_op
+```
+
+#### Best Practices
+
+**Model Generation:**
+
+- Keep models simple, focusing on single operators
+- Use fixed seeds for reproducibility: `torch.manual_seed(42)`
+- Print input/output tensors for reference
+- Verify with [Netron](https://github.com/lutzroeder/netron)
+- Use `do_constant_folding=False` if PyTorch optimizes away operators
+
+**Test Implementation:**
+
+- Test multiple input shapes, data types, and parameters
+- Include edge cases (empty tensors, single elements, large tensors)
+- Use appropriate numerical tolerance levels
+- Test error cases for invalid inputs
+- Cover at least one non-default configuration (e.g., non-unit strides, padding, dilation) in
+  addition to the basic case, to exercise the major codegen branches
+
+#### Debugging Failed Tests
+
+1. **Inspect ONNX Model**: Use Netron to visualize structure
+2. **Check Values**: Add print statements in Python scripts
+3. **Generate Rust Code**: `cargo run -p burn-onnx --bin onnx2burn -- tests/my_op/my_op.onnx ./out`
+4. **Numerical Issues**: Adjust tolerance for precision problems
+
+Testing the processor implementation is particularly important as it directly affects the
+correctness of the conversion process. Incorrect type inference can lead to mismatched tensor shapes
+or wrong element types, while incorrect configuration extraction can cause runtime errors or produce
+incorrect results.
+
+## Node Enum Architecture
+
+The ONNX-IR uses an enum-based node representation where each ONNX operation is a variant of the
+`Node` enum (defined in `crates/onnx-ir/src/ir/node.rs`). Each variant wraps an operation-specific
+node struct (e.g., `SoftmaxNode`, `Conv2dNode`) that contains `name`, `inputs`, `outputs`, and
+optionally a `config` field.
+
+The `define_node_enum!` macro generates both enums from a single source using the syntax
+`VariantName => module::NodeStructType`:
+
+```rust
+define_node_enum! {
+    Softmax => softmax::SoftmaxNode,
+    Conv2d => conv2d::Conv2dNode,
+    Squeeze => squeeze::SqueezeNode,
+    // ... 200+ more variants
+}
+```
+
+This macro generates:
+
+1. **`NodeType` enum**: Simple unit variants for ONNX parsing (`Softmax`, `Conv2d`, etc.)
+2. **`Node` enum**: Tuple variants wrapping node structs (`Softmax(SoftmaxNode)`,
+   `Conv2d(Conv2dNode)`, etc.)
+3. **Accessor methods**: `name()`, `inputs()`, `outputs()` automatically generated for the `Node`
+   enum
+
+This design provides:
+
+- **Type safety**: Each operation has its own struct type
+- **Trait implementations**: Operations can implement specific traits on their node structs
+- **Single source of truth**: Both enums are guaranteed to stay in sync
+- **Pattern matching**: Easy to match on specific operations and access their configuration
+
+## Model Checks
+
+The `crates/model-checks/` directory contains real-world model validation tests. Each subdirectory is
+a standalone crate that downloads a model, generates Burn code from it, and runs inference to verify
+correctness.
+
+### Running Model Checks
+
+Use the `model-check` xtask command:
+
+```sh
+# Run all models (download + build + run, flex backend, release mode)
+cargo xtask model-check
+
+# Single model
+cargo xtask model-check --model silero-vad
+
+# Subcommands: download, build, run, all (default)
+cargo xtask model-check --model silero-vad build
+
+# Select backend
+cargo xtask model-check --features tch
+
+# Debug build
+cargo xtask model-check --model silero-vad --debug
+
+# Stop on first failure (default: continue and report summary)
+cargo xtask model-check --fail-fast
+```
+
+### Available Models
+
+| Model | Directory | Notes |
+|---|---|---|
+| ALBERT | `albert` | Language model (requires Python 3.11) |
+| all-MiniLM-L6-v2 | `all-minilm-l6-v2` | Sentence embeddings |
+| CLIP ViT-B-32 text | `clip-vit-b-32-text` | Text encoder |
+| CLIP ViT-B-32 vision | `clip-vit-b-32-vision` | Vision encoder |
+| Depth-Anything-v2 | `depth-anything-v2` | Monocular depth estimation |
+| Depth Pro | `depth-pro` | Monocular depth estimation (large, partitioned) |
+| MediaPipe Face Detector | `mediapipe-face-detector` | Face detection |
+| ModernBERT-base | `modernbert-base` | Language model |
+| Qwen 1.5/2.5/3 | `qwen` | Language model |
+| RF-DETR Small | `rf-detr` | Object detection |
+| Silero VAD | `silero-vad` | Voice activity detection |
+| SmolLM / SmolLM2 | `smollm` | Language model |
+| YOLO | `yolo` | Object detection (v5/v8/v10/v11/v12) |
+
+### Model Artifacts
+
+Model artifacts (ONNX files, test data) are stored in the platform cache directory:
+
+- macOS: `~/Library/Caches/burn-onnx/model-checks/<model-name>/`
+- Linux: `~/.cache/burn-onnx/model-checks/<model-name>/`
+
+Set `BURN_CACHE_DIR` to override the base cache path (useful for CI).
+
+### Adding a New Model Check
+
+1. Create a new directory under `crates/model-checks/<model-name>/`
+2. Add `Cargo.toml` with `[workspace]` (standalone), `burn` and `burn-store` dependencies, and
+   backend feature flags forwarding to `burn/<backend>`
+3. Add `get_model.py` (uv script format) to download and prepare the ONNX model
+4. Add `build.rs` to generate Burn code from the ONNX model via `ModelGen`
+5. Add `src/main.rs` to load the model, run inference, and compare against reference outputs
+6. Register the model in `xtask/src/model_check.rs` in the `MODELS` array
+
+In `src/main.rs`, use `Model::from_file(bpk_path, &device)` to load the model on the correct
+device. Do NOT use `Model::default().to_device(&device)` because the generated code stores the
+device as `#[module(skip)]` which `to_device()` does not update, causing device mismatch errors
+on GPU backends:
+
+```rust
+model_checks_common::backend_type!();
+
+let device = model_checks_common::best_device!();
+let weights_path = concat!(env!("OUT_DIR"), "/model/<model-name>.bpk");
+let model: Model = Model::from_file(weights_path, &device);
+```
+
+## Custom Operators and Overrides
+
+Operators that are not built in (custom domains like `com.microsoft`, or
+unknown op_types in the default domain) parse as `Node::Custom` instead of
+failing the import. Their type inference and code generation come from hooks
+registered on `ModelGen`. Everything a hook needs is exported from the single
+`burn_onnx::ext` module, including `proc_macro2`/`quote` re-exports so the
+emitted tokens come from the same crate build that burn-onnx links.
+
+A runnable version of everything below lives in `examples/custom-op-hooks/`
+(two custom ops, one override, verified against a numpy reference):
+`cargo run -p custom-op-hooks --bin custom_op_demo`.
+
+### CustomOp: implement a non-built-in operator
+
+A `CustomOp` is matched by ONNX operator identity `(op_type, domain)` and
+supplies both type inference (used during parsing) and code generation:
+
+```rust
+// build.rs of the crate importing the model
+use burn_onnx::ModelGen;
+use burn_onnx::ext::proc_macro2::TokenStream;
+use burn_onnx::ext::{
+    ArgType, CodegenContext, CustomNode, CustomOp, Imports, OpsetRange,
+    ProcessError, arg_to_ident, quote::quote,
+};
+
+struct FftReal;
+
+impl CustomOp for FftReal {
+    fn op_type(&self) -> &str { "FftReal" }
+    fn domain(&self) -> &str { "custom_domain" }        // "" = default domain
+    fn opset_range(&self) -> OpsetRange { OpsetRange::from_min(1) }
+
+    fn infer_output_types(&self, node: &CustomNode) -> Result<Vec<ArgType>, ProcessError> {
+        // Attributes are exposed read-only. Getters return None both for
+        // absent and differently-typed attributes; node.attrs.kind("n_fft")
+        // distinguishes the two when an exporter emits the wrong type.
+        let n_fft = node.attrs.get_i64("n_fft")
+            .ok_or_else(|| ProcessError::MissingAttribute("n_fft".into()))?;
+        let _ = n_fft;
+        // Constant inputs (e.g. a window tensor) are readable here:
+        //   let window = node.inputs.get(1).and_then(|a| a.value());
+        // Must return exactly node.outputs.len() types. May be called more
+        // than once per node (inference is a fixed-point loop), so keep it
+        // deterministic and side-effect free.
+        Ok(vec![node.inputs[0].ty.clone()])
+    }
+
+    fn forward(
+        &self,
+        node: &CustomNode,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let input = ctx.arg(&node.inputs[0]);        // clone tracking handled
+        let out = arg_to_ident(&node.outputs[0]);    // outputs only; inputs go through ctx.arg
+        let n_fft = node.attrs.get_i64("n_fft")
+            .ok_or_else(|| ProcessError::MissingAttribute("n_fft".into()))?;
+        Ok(quote! {
+            let #out = ops::fft_real(#input, #n_fft);
+        })
+    }
+
+    fn register_imports(&self, imports: &mut Imports<'_>) {
+        imports.register("crate::ops");              // emitted as `use crate::ops;`
+    }
+}
+
+fn main() {
+    ModelGen::new()
+        .input("model.onnx")
+        .out_dir("model/")
+        .register_custom_op(FftReal)
+        .run_from_script();
+}
+```
+
+The runtime function (`ops::fft_real` above) lives in your crate and
+takes/returns Burn tensors. The generated `forward` runs inside the model
+struct, so emitted code may also reference `&self.device`.
+
+#### How emitted paths resolve
+
+The generated model is `include!`-ed into YOUR crate, so paths in emitted code
+resolve from there:
+
+- Function in the importing crate itself: use a `crate::...` path (e.g.
+  `crate::ops::fft_real`), or register an import of a `crate::...` module and
+  call through it, as the example above does.
+- Function in a dependency: use the dependency's crate name
+  (`fft_kernels::fft_real`).
+
+A path like `my_crate::ops::...` only works when `my_crate` is literally the
+name of a dependency; for your own crate it fails to resolve inside the
+generated file.
+
+#### What `ctx.arg` produces (types in generated code)
+
+Generated code is monomorphic over the `burn::prelude` aliases (`Tensor<N>`,
+`Device`); there is no `B: Backend` parameter. Your runtime function
+signatures must match this mapping:
+
+| Input `ArgType` | Value type in generated code |
+|---|---|
+| `Tensor` (float, rank N) | `Tensor<N>` |
+| `Tensor` (int/uint, rank N) | `Tensor<N, Int>` |
+| `Tensor` (bool, rank N) | `Tensor<N, Bool>` |
+| `ScalarTensor` | `Tensor<1>` (or `Tensor<1, Int>` / `Tensor<1, Bool>`) |
+| `ScalarNative` | native scalar: `f32`, `i64`, `bool`, `half::f16`, ... |
+| `Shape(N)` | `[i64; N]` |
+
+`ctx.arg` returns an owned value for on-device types (inserting `.clone()`
+automatically when the tensor is used again later) and a bare identifier for
+host values (`ScalarNative`, `Shape`).
+
+Outputs: bind one local per output, named `arg_to_ident(&node.outputs[i])`.
+Downstream nodes find your results by those names. Single output:
+`let #out = ...;`. Multiple outputs: destructure,
+`let (#out0, #out1) = ...;`.
+
+In `infer_output_types`, populate `static_shape` on returned tensor types
+whenever it is computable from the inputs and attributes: downstream
+shape-dependent ops (Reshape, Expand, Slice folding) degrade without it.
+
+#### Discovering a model's custom ops, and iterating
+
+The fastest way to see what you need to implement: run `ModelGen` with NO
+hooks registered. The parse fails with a summary listing every custom
+`(domain, op_type)` pair, its usage count, and its opset - that list is your
+implementation TODO. Hooks with an out-of-range `opset_range` show up the
+same way.
+
+While iterating on `forward`, compile errors point into the generated file
+under `$OUT_DIR/<out_dir>/<model>.rs` - open it to see your emitted code in
+context. `ModelGen::development(true)` additionally writes `<model>.onnx.txt`
+and `<model>.graph.txt` debug dumps next to it.
+
+Notes:
+
+- `infer_output_types` and `forward` run in different phases, so both end up
+  reading the same attributes. Factor the parsing into one helper the two
+  methods share, e.g. `fn parse_config(node: &CustomNode) -> Result<Config,
+  ProcessError>`: validation errors surface at parse time with the friendly
+  summary, and `forward` reuses the same code path.
+- Consumers' output preferences are not consulted for custom ops; the hook is
+  the sole authority on its output types.
+- A constant input still produces a zero-initialized `Param` field in the
+  generated struct. A hook that reads the value via `Argument::value()` and
+  inlines it leaves that field unused (safe with `Model::new`); a hook that
+  consumes the input via `ctx.arg()` gets the runtime tensor, which is only
+  correct when the model is loaded with `from_file`/`from_bytes`.
+- Custom nodes are opaque to graph simplification: they are never CSE-merged,
+  folded, or pattern-matched across. Dead-node elimination still applies.
+- If the model contains custom ops with no covering hook (or the hook's
+  `opset_range` excludes the model's domain opset), parsing fails fast with a
+  list of every missing `(domain, op_type)` pair and usage counts.
+- Custom ops inside `If`/`Loop`/`Scan` subgraph bodies are type-inferred
+  through the hooks, but their code generation is not supported yet: code
+  generation rejects them up front with an error naming the node.
+
+### OpOverride: replace codegen for a built-in operator
+
+An `OpOverride` is matched by `NodeType` and replaces only the generated code;
+the built-in processor still performs type inference. Imports as in the
+`CustomOp` example, plus `Node`, `NodeType`, and `OpOverride`:
+
+```rust
+use burn_onnx::ext::proc_macro2::TokenStream;
+use burn_onnx::ext::{
+    CodegenContext, Node, NodeType, OpOverride, ProcessError, arg_to_ident,
+    quote::quote,
+};
+
+struct MyMatMul;
+
+impl OpOverride for MyMatMul {
+    fn target(&self) -> NodeType { NodeType::MatMul }
+
+    fn forward(
+        &self,
+        node: &Node,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let Node::MatMul(mm) = node else {
+            return Err(ProcessError::Custom("expected MatMul".into()));
+        };
+        let lhs = ctx.arg(&mm.inputs[0]);
+        let rhs = ctx.arg(&mm.inputs[1]);
+        let out = arg_to_ident(&mm.outputs[0]);
+        // crate:: = the importing crate; use a dependency name for kernels
+        // that live in another crate.
+        Ok(quote! {
+            let #out = crate::kernels::custom_matmul(#lhs, #rhs);
+        })
+    }
+}
+
+// ModelGen::new()...register_op_override(MyMatMul)...
+```
+
+`target()` names an IR node type, which is not always the ONNX op type the
+model was exported with: the parser rewrites some patterns before codegen (a
+`MatMul` with a constant 2D weight becomes `Linear`, `Conv` becomes
+`Conv1d`/`Conv2d`/`Conv3d`, decomposed attention coalesces into `Attention`).
+An override whose target was rewritten never fires, silently. Check the
+generated code, or `ModelGen::development(true)` which dumps the parsed graph,
+to see the node types your override will actually be matched against.
+
+An override wins over the built-in for every node of the target type,
+including its `field()`/`collect_tensors()`. The defaults suppress the
+built-in's field, so overriding a weighted op (Conv, Gemm, ...) means
+reimplementing both `field()` and `collect_tensors()` for it; the built-in
+`Field` and its init code are not inherited. Override targets appearing
+inside `If`/`Loop`/`Scan` bodies are rejected at code generation (subgraph
+bodies always use built-in codegen).
+
+Direct `onnx-ir` users can plug inference-only hooks into the parser with
+`OnnxGraphBuilder::with_custom_op_inference` (the `CustomOpInference` trait);
+a hook-less parse keeps a tolerant fallback (declared `value_info` types are
+kept; undeclared outputs mirror the input type) so graphs with unknown ops
+stay inspectable.
+
+## Resources
+
+1. [PyTorch to ONNX](https://pytorch.org/docs/stable/onnx.html)
+2. [ONNX to PyTorch](https://github.com/ENOT-AutoDL/onnx2torch)
+3. [ONNX Introduction](https://onnx.ai/onnx/intro/)
+4. [ONNX Operators](https://onnx.ai/onnx/operators/index.html)
+5. [ONNX Protos](https://onnx.ai/onnx/api/classes.html)
+6. [ONNX Optimizer](https://github.com/onnx/optimizer)
+7. [Netron](https://github.com/lutzroeder/netron)

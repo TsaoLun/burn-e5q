@@ -1,0 +1,294 @@
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
+
+/// Derive macro for generating node builders
+///
+/// Automatically generates a builder with methods for constructing node inputs/outputs.
+///
+/// # Example
+/// ```ignore
+/// #[derive(Debug, Clone, NodeBuilder)]
+/// pub struct AddNode {
+///     pub name: String,
+///     pub inputs: Vec<Argument>,
+///     pub outputs: Vec<Argument>,
+/// }
+/// ```
+///
+/// Generates `AddNodeBuilder` with:
+/// - `new(name)` - Create builder
+/// - `input_tensor(name, rank, dtype)` - Add tensor input (dynamic, no static shape)
+/// - `input_tensor_shape(name, shape, dtype)` - Add tensor input with static shape
+/// - `input_scalar(name, dtype)` - Add scalar input
+/// - `input_shape(name, rank)` - Add shape input (rank = number of dimensions)
+/// - `output_tensor(name, rank, dtype)` - Add output tensor
+/// - `output_scalar(name, dtype)` - Add scalar output
+/// - `output_shape(name, rank)` - Add shape output (rank = number of dimensions)
+/// - `config(config)` - Set config (if node has a config field)
+/// - `build()` - Build the node
+#[proc_macro_derive(NodeBuilder)]
+pub fn node_builder_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let node_name = &input.ident;
+    let builder_name = syn::Ident::new(&format!("{}Builder", node_name), node_name.span());
+
+    // Check if the struct has a config field
+    let has_config = if let Data::Struct(data) = &input.data {
+        if let Fields::Named(fields) = &data.fields {
+            fields
+                .named
+                .iter()
+                .any(|f| f.ident.as_ref().map(|i| i == "config").unwrap_or(false))
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Extract config type if it exists
+    let config_type = if has_config {
+        if let Data::Struct(data) = &input.data {
+            if let Fields::Named(fields) = &data.fields {
+                fields
+                    .named
+                    .iter()
+                    .find(|f| f.ident.as_ref().map(|i| i == "config").unwrap_or(false))
+                    .map(|f| &f.ty)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let config_field = if let Some(config_ty) = config_type {
+        quote! {
+            config: Option<#config_ty>,
+        }
+    } else {
+        quote! {}
+    };
+
+    let config_init = if has_config {
+        quote! { config: None, }
+    } else {
+        quote! {}
+    };
+
+    let config_method = if let Some(config_ty) = config_type {
+        quote! {
+            /// Set the configuration
+            pub fn config(mut self, config: #config_ty) -> Self {
+                self.config = Some(config);
+                self
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let config_build = if has_config {
+        quote! {
+            config: self.config.expect("Config must be set before calling build()"),
+        }
+    } else {
+        quote! {}
+    };
+
+    // Derive the op name by stripping "Node" suffix (e.g. "AcosNode" -> "Acos")
+    let node_name_str = node_name.to_string();
+    let op_name = node_name_str.strip_suffix("Node").unwrap_or(&node_name_str);
+    let op_name_lit = syn::LitStr::new(op_name, node_name.span());
+
+    let display_config = if has_config {
+        quote! {
+            write!(f, "  Config:\n")?;
+            for line in format!("{:#?}", self.config).lines() {
+                write!(f, "    {line}\n")?;
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let expanded = quote! {
+        impl ::core::fmt::Display for #node_name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                write!(f, "{} {:?}\n", #op_name_lit, self.name)?;
+                write!(f, "  Inputs:\n")?;
+                for arg in &self.inputs {
+                    write!(f, "    {arg}\n")?;
+                }
+                write!(f, "  Outputs:\n")?;
+                for arg in &self.outputs {
+                    write!(f, "    {arg}\n")?;
+                }
+                #display_config
+                Ok(())
+            }
+        }
+
+        pub struct #builder_name {
+            name: String,
+            inputs: Vec<crate::ir::Argument>,
+            outputs: Vec<crate::ir::Argument>,
+            #config_field
+        }
+
+        impl #builder_name {
+            /// Create a new builder
+            pub fn new(name: impl Into<String>) -> Self {
+                Self {
+                    name: name.into(),
+                    inputs: vec![],
+                    outputs: vec![],
+                    #config_init
+                }
+            }
+
+            /// Add a tensor input (dynamic, no static shape)
+            pub fn input_tensor(
+                mut self,
+                name: &str,
+                rank: usize,
+                dtype: burn_tensor::DType,
+            ) -> Self {
+                use crate::ir::{Argument, ArgType, TensorType};
+                self.inputs.push(Argument::new(
+                    name,
+                    ArgType::Tensor(TensorType {
+                        dtype,
+                        rank,
+                        static_shape: None,
+                    }),
+                ));
+                self
+            }
+
+            /// Add a tensor input with fully-known static shape
+            pub fn input_tensor_shape(
+                mut self,
+                name: &str,
+                shape: Vec<usize>,
+                dtype: burn_tensor::DType,
+            ) -> Self {
+                use crate::ir::{Argument, ArgType, TensorType};
+                self.inputs.push(Argument::new(
+                    name,
+                    ArgType::Tensor(TensorType::new_known(dtype, shape)),
+                ));
+                self
+            }
+
+            /// Add a static tensor input with fully-known shape (not a forward parameter)
+            pub fn input_static_tensor_shape(
+                mut self,
+                name: &str,
+                shape: Vec<usize>,
+                dtype: burn_tensor::DType,
+            ) -> Self {
+                use crate::ir::{Argument, ArgType, TensorType, ValueSource};
+                let mut arg = Argument::new(
+                    name,
+                    ArgType::Tensor(TensorType::new_known(dtype, shape)),
+                );
+                arg.value_source = ValueSource::Static(0);
+                self.inputs.push(arg);
+                self
+            }
+
+            /// Add a scalar input (native Rust type, rank 0)
+            pub fn input_scalar(mut self, name: &str, dtype: burn_tensor::DType) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.inputs.push(Argument::new(name, ArgType::ScalarNative(dtype)));
+                self
+            }
+
+            /// Add a scalar tensor input (1D tensor on device, rank 1)
+            pub fn input_scalar_tensor(mut self, name: &str, dtype: burn_tensor::DType) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.inputs.push(Argument::new(name, ArgType::ScalarTensor(dtype)));
+                self
+            }
+
+            /// Add a shape input with a specific rank (number of dimensions the shape describes)
+            ///
+            /// For example, a 4D tensor shape `[N, C, H, W]` has rank 4.
+            pub fn input_shape(mut self, name: &str, rank: usize) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.inputs.push(Argument::new(name, ArgType::Shape(rank)));
+                self
+            }
+
+            /// Add an output tensor
+            pub fn output_tensor(
+                mut self,
+                name: &str,
+                rank: usize,
+                dtype: burn_tensor::DType,
+            ) -> Self {
+                use crate::ir::{Argument, ArgType, TensorType};
+                self.outputs.push(Argument::new(
+                    name,
+                    ArgType::Tensor(TensorType {
+                        dtype,
+                        rank,
+                        static_shape: None,
+                    }),
+                ));
+                self
+            }
+
+            /// Add a scalar output (native Rust type, rank 0)
+            pub fn output_scalar(mut self, name: &str, dtype: burn_tensor::DType) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.outputs.push(Argument::new(name, ArgType::ScalarNative(dtype)));
+                self
+            }
+
+            /// Add a scalar tensor output (1D tensor on device, rank 1)
+            pub fn output_scalar_tensor(mut self, name: &str, dtype: burn_tensor::DType) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.outputs.push(Argument::new(name, ArgType::ScalarTensor(dtype)));
+                self
+            }
+
+            /// Add a shape output with a specific rank (number of dimensions the shape describes)
+            ///
+            /// For example, a 4D tensor shape `[N, C, H, W]` has rank 4.
+            pub fn output_shape(mut self, name: &str, rank: usize) -> Self {
+                use crate::ir::{Argument, ArgType};
+                self.outputs.push(Argument::new(name, ArgType::Shape(rank)));
+                self
+            }
+
+            /// Add a constant i64 scalar input with a known value
+            pub fn input_const_i64(mut self, name: &str, value: i64) -> Self {
+                use crate::ir::Argument;
+                let arg = Argument::from_const_i64(name, value);
+                self.inputs.push(arg);
+                self
+            }
+
+            #config_method
+
+            /// Build the node
+            pub fn build(self) -> #node_name {
+                #node_name {
+                    name: self.name,
+                    inputs: self.inputs,
+                    outputs: self.outputs,
+                    #config_build
+                }
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}

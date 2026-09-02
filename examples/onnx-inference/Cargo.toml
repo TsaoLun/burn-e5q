@@ -1,0 +1,18 @@
+[package]
+authors = ["Dilshod Tadjibaev (@antimora)"]
+edition.workspace = true
+license.workspace = true
+name = "onnx-inference"
+publish = false
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+burn = { workspace = true, features = ["flex", "dataset", "vision"] }
+burn-store = { workspace = true, features = ["std"] }
+serde = { workspace = true }
+
+[build-dependencies]
+burn-onnx = { workspace = true, features = ["default"] }

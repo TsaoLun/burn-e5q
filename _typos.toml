@@ -1,0 +1,21 @@
+[default]
+extend-ignore-identifiers-re = ["NdArray*", "ND"]
+
+[files]
+extend-exclude = [
+    "*.onnx",
+    "*.proto",
+    # ImageNet labels contain scientific names that look like typos
+    "examples/image-classification-web/src/model/label.txt",
+    # Auto-generated ONNX operator specs contain formulas with variable names that look like typos
+    "onnx-spec/ops/",
+    # Vendored upstream ONNX backend test data contains binary protobuf
+    # `.pb` files whose raw bytes can match typo patterns by chance.
+    "crates/onnx-official-tests/vendor/",
+]
+
+[default.extend-words]
+# Don't correct "arange" which is intentional
+arange = "arange"
+# "nd" is used in ONNX operator names like ScatterND, scatter_nd
+nd = "nd"

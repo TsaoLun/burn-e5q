@@ -1,0 +1,615 @@
+//! # Conv (2D)
+//!
+//! 2D convolution operation.
+//!
+//! **ONNX Spec**: <https://onnx.ai/onnx/operators/onnx__Conv.html>
+//!
+//! ## Opset Versions
+//! - **Opset 1**: Initial version with basic convolution support
+//! - **Opset 11**: No changes to Conv operator itself (broader ONNX updates)
+
+use derive_new::new;
+use onnx_ir_derive::NodeBuilder;
+
+use crate::ir::{ArgType, Argument, Node, RawNode, TensorType};
+use crate::node::padding::{AutoPad, PaddingConfig2d, padding_config_2d};
+use crate::processor::{
+    InputSpec, NodeProcessor, NodeSpec, OutputPreferences, OutputSpec, ProcessError,
+};
+
+/// Node representation for Conv2d operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct Conv2dNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+    pub config: Conv2dConfig,
+}
+
+/// Configuration for Conv2d operations
+#[derive(Debug, Clone, new)]
+#[allow(clippy::too_many_arguments)]
+pub struct Conv2dConfig {
+    /// Kernel size [height, width]
+    pub kernel_size: [usize; 2],
+    /// Stride [height, width]
+    pub stride: [usize; 2],
+    /// Padding configuration
+    pub padding: PaddingConfig2d,
+    /// Dilation [height, width]
+    pub dilation: [usize; 2],
+    /// Number of groups
+    pub groups: usize,
+    /// Auto padding mode
+    pub auto_pad: AutoPad,
+}
+
+/// Node processor for Conv2d operation
+pub(crate) struct Conv2dProcessor;
+
+impl NodeProcessor for Conv2dProcessor {
+    type Config = Conv2dConfig;
+
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            min_opset: 1,
+            max_opset: None,
+            inputs: InputSpec::Range(2, 3),
+            outputs: OutputSpec::Exact(1),
+        }
+    }
+
+    fn lift_constants(&self, node: &mut RawNode, _opset: usize) -> Result<(), ProcessError> {
+        // Lift weight (input[1]) and optional bias (input[2])
+        if node.inputs.len() > 1 && node.inputs[1].is_constant() {
+            node.inputs[1].to_static()?;
+        }
+        if node.inputs.len() > 2 && node.inputs[2].is_constant() {
+            node.inputs[2].to_static()?;
+        }
+
+        Ok(())
+    }
+
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        _opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // TODO: Add test for zero or negative stride values - spec requires positive strides
+        // TODO: Add test for zero or negative dilation values - spec requires positive dilations
+        // TODO: Add test for zero or negative group values - spec requires positive groups
+        // TODO: Validate channels_in divisible by groups - required by spec but not validated
+        // TODO: Validate channels_out divisible by groups - required by spec but not validated
+        // TODO: Add test for very large kernel_shape/stride/dilation - potential overflow/memory issues
+        // TODO: Add test coverage for auto_pad values: SAME_UPPER, SAME_LOWER, VALID - currently unsupported
+        // TODO: Add test for asymmetric kernel shapes (e.g., [3, 5]) - valid but may not be tested
+
+        // Validate attributes before extracting config
+        for (key, value) in node.attrs.iter() {
+            match key.as_str() {
+                "kernel_shape" | "strides" | "pads" | "dilations" | "group" => {}
+                "auto_pad" => {
+                    AutoPad::parse(&value.clone().into_string())?;
+                }
+                _ => {
+                    return Err(ProcessError::InvalidAttribute {
+                        name: key.clone(),
+                        reason: format!("Unexpected attribute for Conv2d: {key}"),
+                    });
+                }
+            }
+        }
+
+        crate::node::padding::validate_auto_pad(node)?;
+
+        // Extract input tensor type
+        let tensor = match &node.inputs[0].ty {
+            ArgType::Tensor(tensor) => tensor,
+            _ => {
+                return Err(ProcessError::TypeMismatch {
+                    expected: "Tensor".to_string(),
+                    actual: format!("{:?}", node.inputs[0].ty),
+                });
+            }
+        };
+
+        // Validate input tensor rank - Conv2d expects rank 4 (N x C x H x W)
+        if tensor.rank != 4 {
+            return Err(ProcessError::Custom(format!(
+                "Conv2d expects input tensor of rank 4 (N x C x H x W), got rank {}",
+                tensor.rank
+            )));
+        }
+
+        // Validate weight tensor type and rank
+        let weight_tensor = match &node.inputs[1].ty {
+            ArgType::Tensor(tensor) => tensor,
+            _ => {
+                return Err(ProcessError::TypeMismatch {
+                    expected: "Tensor (weight)".to_string(),
+                    actual: format!("{:?}", node.inputs[1].ty),
+                });
+            }
+        };
+
+        // Weight should be rank 4 (M x C/group x kH x kW)
+        if weight_tensor.rank != 4 {
+            return Err(ProcessError::Custom(format!(
+                "Conv2d expects weight tensor of rank 4 (M x C/group x kH x kW), got rank {}",
+                weight_tensor.rank
+            )));
+        }
+
+        // Validate dtypes match
+        if tensor.dtype != weight_tensor.dtype {
+            return Err(ProcessError::TypeMismatch {
+                expected: format!("Weight tensor with dtype {:?}", tensor.dtype),
+                actual: format!("Weight tensor with dtype {:?}", weight_tensor.dtype),
+            });
+        }
+
+        // Validate bias if present
+        if node.inputs.len() > 2 {
+            let bias_tensor = match &node.inputs[2].ty {
+                ArgType::Tensor(tensor) => tensor,
+                _ => {
+                    return Err(ProcessError::TypeMismatch {
+                        expected: "Tensor (bias)".to_string(),
+                        actual: format!("{:?}", node.inputs[2].ty),
+                    });
+                }
+            };
+
+            // Bias should be rank 1 (M)
+            if bias_tensor.rank != 1 {
+                return Err(ProcessError::Custom(format!(
+                    "Conv2d expects bias tensor of rank 1 (M), got rank {}",
+                    bias_tensor.rank
+                )));
+            }
+
+            // Validate bias dtype matches
+            if tensor.dtype != bias_tensor.dtype {
+                return Err(ProcessError::TypeMismatch {
+                    expected: format!("Bias tensor with dtype {:?}", tensor.dtype),
+                    actual: format!("Bias tensor with dtype {:?}", bias_tensor.dtype),
+                });
+            }
+        }
+
+        // Compute output static_shape: [batch, out_channels, H_out, W_out]
+        let static_shape = {
+            let batch = tensor
+                .static_shape
+                .as_ref()
+                .and_then(|s| s.first().copied().flatten());
+            let out_channels = node.inputs[1]
+                .value()
+                .and_then(|data| data.shape.first().copied())
+                .or_else(|| {
+                    weight_tensor
+                        .static_shape
+                        .as_ref()
+                        .and_then(|s| s.first().copied().flatten())
+                });
+
+            let compute_spatial = |dim_idx: usize,
+                                   kernel: usize,
+                                   stride: usize,
+                                   dilation: usize,
+                                   pad_begin: usize,
+                                   pad_end: usize|
+             -> Option<usize> {
+                let input_dim = tensor
+                    .static_shape
+                    .as_ref()
+                    .and_then(|s| s.get(dim_idx).copied().flatten())?;
+                let padding = pad_begin + pad_end;
+                let numerator = input_dim as isize + padding as isize
+                    - dilation as isize * (kernel as isize - 1)
+                    - 1;
+                if numerator < 0 || stride == 0 {
+                    return None;
+                }
+                Some(numerator as usize / stride + 1)
+            };
+
+            let spatial = self.extract_config(node, _opset).ok().map(|config| {
+                let (pad_top, pad_left, pad_bottom, pad_right) = config.padding.as_tuple();
+                let h_out = compute_spatial(
+                    2,
+                    config.kernel_size[0],
+                    config.stride[0],
+                    config.dilation[0],
+                    pad_top,
+                    pad_bottom,
+                );
+                let w_out = compute_spatial(
+                    3,
+                    config.kernel_size[1],
+                    config.stride[1],
+                    config.dilation[1],
+                    pad_left,
+                    pad_right,
+                );
+                (h_out, w_out)
+            });
+            let (h_out, w_out) = spatial.unwrap_or((None, None));
+            Some(vec![batch, out_channels, h_out, w_out])
+        };
+
+        // Conv2d preserves rank (same as input)
+        node.outputs[0].ty = ArgType::Tensor(TensorType {
+            dtype: tensor.dtype,
+            rank: tensor.rank,
+            static_shape,
+        });
+
+        Ok(())
+    }
+
+    fn extract_config(&self, node: &RawNode, _opset: usize) -> Result<Self::Config, ProcessError> {
+        let mut kernel_shape = Vec::new();
+        let mut strides = vec![1, 1];
+        let mut pads = vec![0, 0, 0, 0];
+        let mut dilations = vec![1, 1];
+        let mut group: usize = 1;
+        let mut auto_pad = AutoPad::NotSet;
+
+        let weight_shape = node.inputs[1]
+            .value()
+            .ok_or_else(|| {
+                ProcessError::Custom("Conv2d: weight tensor must be present".to_string())
+            })?
+            .shape
+            .to_vec();
+
+        for (key, value) in node.attrs.iter() {
+            match key.as_str() {
+                "kernel_shape" => kernel_shape = value.clone().into_i64s(),
+                "strides" => strides = value.clone().into_i64s(),
+                "pads" => pads = value.clone().into_i64s(),
+                "dilations" => dilations = value.clone().into_i64s(),
+                "group" => group = value.clone().into_i64() as usize,
+                "auto_pad" => auto_pad = AutoPad::parse(&value.clone().into_string())?,
+                _ => {}
+            }
+        }
+
+        let padding = padding_config_2d(&pads);
+
+        let kernel_size = if kernel_shape.is_empty() {
+            if weight_shape.len() != 4 {
+                return Err(ProcessError::Custom(format!(
+                    "Conv2d: expected to infer kernel shape from a weight tensor of rank 4 but got shape {:?}",
+                    weight_shape
+                )));
+            }
+            [weight_shape[2], weight_shape[3]]
+        } else {
+            [kernel_shape[0] as _, kernel_shape[1] as _]
+        };
+
+        let config = Conv2dConfig::new(
+            kernel_size,
+            [strides[0] as usize, strides[1] as usize],
+            padding,
+            [dilations[0] as usize, dilations[1] as usize],
+            group,
+            auto_pad,
+        );
+
+        Ok(config)
+    }
+
+    fn build_node(&self, builder: RawNode, opset: usize) -> Node {
+        let config = self
+            .extract_config(&builder, opset)
+            .expect("Config extraction failed");
+
+        Node::Conv2d(Conv2dNode {
+            name: builder.name,
+            inputs: builder.inputs,
+            outputs: builder.outputs,
+            config,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::NodeType;
+    use crate::node::test_utils::TestNodeBuilder;
+
+    fn create_test_node(
+        kernel_shape: Vec<i64>,
+        strides: Vec<i64>,
+        pads: Vec<i64>,
+        dilations: Vec<i64>,
+        group: i64,
+        has_bias: bool,
+        auto_pad: Option<&str>,
+    ) -> TestNodeBuilder {
+        // Weight tensor data - not important for the test
+        // [output_channels, input_channels/groups, k_h, k_w]
+        let weight_shape = vec![4, 2, 2, 2];
+        let weight_data = vec![0.0; 32]; // 4*2*2*2 = 32
+
+        let has_kernel_shape = !kernel_shape.is_empty();
+
+        let mut builder = TestNodeBuilder::new(NodeType::Conv2d, "test_conv2d")
+            .input_tensor_f32("data", 4, None)
+            .input_tensor_f32_data("weight", weight_data.clone(), weight_shape)
+            .output_tensor_f32("output", 4, None)
+            .attr_ints("strides", strides)
+            .attr_ints("pads", pads)
+            .attr_ints("dilations", dilations)
+            .attr_int("group", group);
+
+        if has_kernel_shape {
+            builder = builder.attr_ints("kernel_shape", kernel_shape);
+        }
+
+        if has_bias {
+            builder = builder.input_tensor_f32("bias", 1, None);
+        }
+
+        if let Some(auto_pad) = auto_pad {
+            builder = builder.attr_string("auto_pad", auto_pad);
+        }
+
+        builder
+    }
+
+    #[test]
+    fn test_conv2d_config_basic() {
+        let node = create_test_node(
+            vec![2, 2],
+            vec![1, 1],
+            vec![0, 0, 0, 0],
+            vec![1, 1],
+            1,
+            false,
+            None,
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.kernel_size, [2, 2]);
+        assert_eq!(config.stride, [1, 1]);
+        assert_eq!(config.dilation, [1, 1]);
+        assert_eq!(config.groups, 1);
+        assert!(matches!(config.padding, PaddingConfig2d::Valid));
+    }
+
+    #[test]
+    fn test_conv2d_config_with_padding() {
+        let node = create_test_node(
+            vec![3, 3],
+            vec![1, 1],
+            vec![1, 1, 1, 1],
+            vec![1, 1],
+            1,
+            false,
+            None,
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.kernel_size, [3, 3]);
+        assert!(matches!(
+            config.padding,
+            PaddingConfig2d::Explicit(1, 1, 1, 1)
+        ));
+    }
+
+    #[test]
+    fn test_conv2d_config_with_groups() {
+        let node = create_test_node(
+            vec![2, 2],
+            vec![1, 1],
+            vec![0, 0, 0, 0],
+            vec![1, 1],
+            2,
+            false,
+            None,
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.groups, 2);
+    }
+
+    #[test]
+    fn test_conv2d_config_autopad_not_set() {
+        let node = create_test_node(
+            vec![3, 3],
+            vec![1, 1],
+            vec![1, 1, 1, 1],
+            vec![1, 1],
+            1,
+            false,
+            Some("NOTSET"),
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.kernel_size, [3, 3]);
+        assert!(matches!(
+            config.padding,
+            PaddingConfig2d::Explicit(1, 1, 1, 1)
+        ));
+    }
+
+    #[test]
+    fn test_conv2d_config_autopad_same_upper() {
+        let node = create_test_node(
+            vec![3, 3],
+            vec![1, 1],
+            vec![1, 1, 1, 1],
+            vec![1, 1],
+            1,
+            false,
+            Some("SAME_UPPER"),
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+        let config = processor.extract_config(&node, 16).unwrap();
+        assert_eq!(config.auto_pad, AutoPad::SameUpper);
+    }
+
+    #[test]
+    fn test_conv2d_config_kernel_shape_not_set() {
+        let node = create_test_node(
+            vec![],
+            vec![1, 1],
+            vec![0, 0, 0, 0],
+            vec![1, 1],
+            1,
+            false,
+            None,
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.kernel_size, [2, 2]); // Inferred via weight tensor shape
+    }
+
+    #[test]
+    fn test_conv2d_static_shape_known() {
+        // Input [1, 2, 8, 8], weight [4, 2, 2, 2], stride=[1,1], pad=0, dilation=[1,1]
+        // H_out = (8 + 0 - 1*(2-1) - 1) / 1 + 1 = (8 - 1 - 1) / 1 + 1 = 7
+        // W_out = same = 7
+        let mut node = TestNodeBuilder::new(NodeType::Conv2d, "test")
+            .input_tensor_f32("data", 4, Some(vec![1, 2, 8, 8]))
+            .input_tensor_f32_data("weight", vec![0.0; 32], vec![4, 2, 2, 2])
+            .output_tensor_f32("output", 4, None)
+            .attr_ints("kernel_shape", vec![2, 2])
+            .attr_ints("strides", vec![1, 1])
+            .attr_ints("pads", vec![0, 0, 0, 0])
+            .attr_ints("dilations", vec![1, 1])
+            .attr_int("group", 1)
+            .build_with_graph_data(16);
+
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.rank, 4);
+                assert_eq!(
+                    t.static_shape,
+                    Some(vec![Some(1), Some(4), Some(7), Some(7)])
+                );
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_conv2d_static_shape_with_padding() {
+        // Input [1, 2, 8, 8], weight [4, 2, 3, 3], stride=[1,1], pad=[1,1,1,1], dilation=[1,1]
+        // H_out = (8 + 2 - 1*(3-1) - 1) / 1 + 1 = (8 + 2 - 2 - 1) / 1 + 1 = 8
+        let mut node = TestNodeBuilder::new(NodeType::Conv2d, "test")
+            .input_tensor_f32("data", 4, Some(vec![1, 2, 8, 8]))
+            .input_tensor_f32_data("weight", vec![0.0; 72], vec![4, 2, 3, 3])
+            .output_tensor_f32("output", 4, None)
+            .attr_ints("kernel_shape", vec![3, 3])
+            .attr_ints("strides", vec![1, 1])
+            .attr_ints("pads", vec![1, 1, 1, 1])
+            .attr_ints("dilations", vec![1, 1])
+            .attr_int("group", 1)
+            .build_with_graph_data(16);
+
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.rank, 4);
+                assert_eq!(
+                    t.static_shape,
+                    Some(vec![Some(1), Some(4), Some(8), Some(8)])
+                );
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_conv2d_static_shape_no_input_shape() {
+        // No input static_shape -> batch and spatial are None, out_channels is known
+        let node = create_test_node(
+            vec![2, 2],
+            vec![1, 1],
+            vec![0, 0, 0, 0],
+            vec![1, 1],
+            1,
+            false,
+            None,
+        )
+        .build_with_graph_data(16);
+        let mut node = node;
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.rank, 4);
+                assert_eq!(t.static_shape, Some(vec![None, Some(4), None, None]));
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    /// Pins `validate_auto_pad` into this processor's `infer_types`. Without the call the node
+    /// reaches burn-onnx codegen, which panics instead of reporting a `ProcessError`.
+    #[test]
+    fn test_conv2d_rejects_unsupported_auto_pad_on_dynamic_shape() {
+        let mut node = TestNodeBuilder::new(NodeType::Conv2d, "test_auto_pad")
+            .input_tensor_f32("data", 4, None)
+            .input_tensor_f32_data("weight", vec![0.0; 32], vec![4, 2, 2, 2])
+            .output_tensor_f32("output", 4, None)
+            .attr_string("auto_pad", "SAME_LOWER")
+            .build_with_graph_data(16);
+        let processor = Conv2dProcessor;
+        let prefs = OutputPreferences::new();
+        let err = processor
+            .infer_types(&mut node, 16, &prefs)
+            .expect_err("SAME_LOWER over a dynamic input must be rejected")
+            .to_string();
+        assert!(
+            err.contains(&crate::node::padding::SameBlocker::SameLower.to_string()),
+            "{err}"
+        );
+    }
+}

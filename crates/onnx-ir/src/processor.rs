@@ -1,0 +1,1001 @@
+//! Node processor trait and infrastructure for node-centric processing.
+//!
+//! This module defines the `NodeProcessor` trait with support for type preferences
+//! and proper error handling.
+
+use crate::ir::{Argument, Node, RawNode};
+use std::collections::HashMap;
+
+// Re-export registry types for backward compatibility
+pub use crate::registry::get_processor_registry;
+
+// ============================================================================
+// Node Specification System
+// ============================================================================
+
+/// Specification for input count validation
+#[derive(Debug, Clone)]
+pub enum InputSpec {
+    /// Exact count required
+    Exact(usize),
+    /// Minimum count required
+    AtLeast(usize),
+    /// Range of valid counts (min, max inclusive)
+    Range(usize, usize),
+    /// Different specs for different opset versions (opset_version, spec)
+    OpsetDependent(Vec<(usize, InputSpec)>),
+}
+
+/// Specification for output count validation
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum OutputSpec {
+    /// Exact count required
+    Exact(usize),
+    /// Range of valid counts (min, max inclusive)
+    Range(usize, usize),
+    /// Different specs for different opset versions (opset_version, spec)
+    OpsetDependent(Vec<(usize, OutputSpec)>),
+}
+
+/// Specification for node validation and metadata
+#[derive(Debug, Clone)]
+pub struct NodeSpec {
+    /// Minimum supported opset version
+    pub min_opset: usize,
+    /// Maximum supported opset version (None = no max)
+    pub max_opset: Option<usize>,
+    /// Input count validation
+    pub inputs: InputSpec,
+    /// Output count validation
+    pub outputs: OutputSpec,
+}
+
+impl Default for NodeSpec {
+    fn default() -> Self {
+        Self {
+            min_opset: 1,
+            max_opset: None,
+            inputs: InputSpec::AtLeast(0),
+            outputs: OutputSpec::Range(0, 2147483647),
+        }
+    }
+}
+
+/// Type preferences for node inputs
+#[derive(Debug, Default, Clone)]
+pub struct InputPreferences {
+    preferences: HashMap<String, Vec<ArgPreference>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArgPreference {
+    /// Must be native scalar (for shape ops, arange bounds, conditions, indices)
+    ScalarNative,
+    Shape,
+    Tensor,
+}
+
+impl InputPreferences {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(mut self, input_name: impl Into<String>, ty: ArgPreference) -> Self {
+        self.preferences
+            .entry(input_name.into())
+            .or_default()
+            .push(ty);
+        self
+    }
+
+    pub fn get(&self, input_name: &str) -> &[ArgPreference] {
+        self.preferences
+            .get(input_name)
+            .map_or(&[], |v| v.as_slice())
+    }
+}
+
+/// Type preferences requested by consumers for a node's outputs
+#[derive(Debug, Default, Clone)]
+pub struct OutputPreferences {
+    // output_name -> [(consumer_name, requested_type)]
+    requests: HashMap<String, Vec<(String, ArgPreference)>>,
+}
+
+impl OutputPreferences {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(
+        &mut self,
+        output_name: impl Into<String>,
+        consumer: impl Into<String>,
+        ty: ArgPreference,
+    ) {
+        self.requests
+            .entry(output_name.into())
+            .or_default()
+            .push((consumer.into(), ty));
+    }
+
+    pub fn get(&self, output_name: &str) -> &[(String, ArgPreference)] {
+        self.requests.get(output_name).map_or(&[], |v| v.as_slice())
+    }
+}
+
+/// Errors that can occur during node processing
+#[derive(Debug, Clone)]
+pub enum ProcessError {
+    UnsupportedOpset {
+        required: usize,
+        actual: usize,
+    },
+    MissingInput(String),
+    MissingOutput(String),
+    InvalidInputCount {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidOutputCount {
+        expected: usize,
+        actual: usize,
+    },
+    TypeMismatch {
+        expected: String,
+        actual: String,
+    },
+    ConflictingPreferences {
+        output: String,
+        details: Vec<String>,
+    },
+    MissingAttribute(String),
+    InvalidAttribute {
+        name: String,
+        reason: String,
+    },
+    UnsupportedOps(Vec<String>),
+    Custom(String),
+}
+
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessError::UnsupportedOpset { required, actual } => {
+                write!(
+                    f,
+                    "Unsupported opset version: requires {required}, got {actual}"
+                )
+            }
+            ProcessError::MissingInput(name) => write!(f, "Missing input: {name}"),
+            ProcessError::MissingOutput(name) => write!(f, "Missing output: {name}"),
+            ProcessError::InvalidInputCount { expected, actual } => {
+                write!(f, "Invalid input count: expected {expected}, got {actual}")
+            }
+            ProcessError::InvalidOutputCount { expected, actual } => {
+                write!(f, "Invalid output count: expected {expected}, got {actual}")
+            }
+            ProcessError::TypeMismatch { expected, actual } => {
+                write!(f, "Type mismatch: expected {expected}, got {actual}")
+            }
+            ProcessError::ConflictingPreferences { output, details } => {
+                write!(
+                    f,
+                    "Conflicting preferences for output '{output}': {}",
+                    details.join(", ")
+                )
+            }
+            ProcessError::MissingAttribute(name) => write!(f, "Missing attribute: {name}"),
+            ProcessError::InvalidAttribute { name, reason } => {
+                write!(f, "Invalid attribute '{name}': {reason}")
+            }
+            ProcessError::UnsupportedOps(ops) => {
+                write!(f, "Unsupported ONNX operation(s): {}", ops.join(", "))
+            }
+            ProcessError::Custom(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+/// Node-specific processing logic for type inference and configuration extraction
+pub trait NodeProcessor: Send + Sync {
+    /// Associated config type for this processor
+    ///
+    /// For operations without config, use `()` as the type.
+    type Config: Clone;
+
+    /// Return the node specification for validation
+    ///
+    /// This defines the supported opset versions, input/output counts, etc.
+    /// Validation is automatically performed before processing.
+    fn spec(&self) -> NodeSpec {
+        NodeSpec::default()
+    }
+
+    /// Declare preferred types for inputs (propagated to producers as `output_preferences`)
+    ///
+    /// Preferences are requests, not requirements. Producers may honor them (e.g., Constant→Shape).
+    fn input_preferences(
+        &self,
+        _node: &RawNode,
+        _opset: usize,
+    ) -> Result<Option<InputPreferences>, ProcessError> {
+        Ok(None)
+    }
+
+    /// Convert constant inputs to static values (embedded in config, unreferenced constants removed later)
+    fn lift_constants(&self, _node: &mut RawNode, _opset: usize) -> Result<(), ProcessError> {
+        Ok(())
+    }
+
+    /// Infer output types given preferences from consumers
+    ///
+    /// This method should call `extract_config()` internally if it needs the config.
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        opset: usize,
+        output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError>;
+
+    /// Extract config dynamically (not cached in RawNode)
+    ///
+    /// This is called by `infer_types()` and `build_node()` as needed.
+    /// Processors with non-trivial config must implement this method.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation returns an error. Only processors with `type Config = ()`
+    /// should rely on never calling this method.
+    fn extract_config(&self, _node: &RawNode, _opset: usize) -> Result<Self::Config, ProcessError>
+    where
+        Self: Sized,
+    {
+        Err(ProcessError::Custom(format!(
+            "extract_config not implemented for {} - processors with non-unit Config type must implement this method",
+            std::any::type_name::<Self>()
+        )))
+    }
+
+    /// Returns true if this node is a no-op (output equals input).
+    ///
+    /// When true, the node will be eliminated during post-processing and its output
+    /// rewired to its first input, similar to Identity elimination.
+    /// Called after type inference when input/output types are known.
+    fn is_noop(&self, _node: &RawNode) -> bool {
+        false
+    }
+
+    /// Build the final Node enum from a RawNode
+    ///
+    /// This method converts the RawNode into the final immutable Node enum.
+    /// It should call `extract_config()` internally to get the config.
+    ///
+    /// # Default Implementation
+    ///
+    /// The default implementation panics with the processor type name.
+    /// Each processor should implement this method to build its specific Node variant.
+    fn build_node(&self, node: RawNode, _opset: usize) -> Node
+    where
+        Self: Sized,
+    {
+        panic!(
+            "build_node not implemented for {:?} - each processor must implement this method",
+            node.node_type
+        )
+    }
+}
+
+/// Default processor for nodes without specific implementations.
+///
+/// This processor passes through the input type to output.
+pub(crate) struct DefaultProcessor;
+
+impl NodeProcessor for DefaultProcessor {
+    type Config = ();
+
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        _opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // Default: preserve input type
+        same_as_input(node);
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Processor Utilities
+// ============================================================================
+
+/// Validate opset version
+pub fn validate_opset(opset: usize, min_version: usize) -> Result<(), ProcessError> {
+    if opset < min_version {
+        Err(ProcessError::UnsupportedOpset {
+            required: min_version,
+            actual: opset,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Validate that no rank-0 tensors exist in the node
+///
+/// Rank-0 tensors should be represented as Scalars instead.
+/// This is an invariant of the ONNX IR - there should never be Tensor(rank=0) in the graph.
+pub fn validate_no_rank_zero_tensors(node: &RawNode) -> Result<(), ProcessError> {
+    use crate::ir::ArgType;
+
+    // Check all outputs for rank-0 tensors
+    for output in &node.outputs {
+        if let ArgType::Tensor(tensor) = &output.ty
+            && tensor.rank == 0
+        {
+            return Err(ProcessError::Custom(format!(
+                "Invalid type inference: Node '{}' output '{}' has rank-0 tensor. \
+                 Rank-0 tensors should be Scalar type instead.",
+                node.name, output.name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate the group of inputs that [`lift_all_or_none`] treats as a unit.
+///
+/// `required` names the members that must be provided; the rest may be absent or left
+/// optional. Every provided member must agree on where its value comes from, because a
+/// consumer takes the group either entirely at build time or entirely at run time and
+/// has nowhere to put a mixture. A subgraph is the way one arises: a body that captures
+/// an already-lifted outer value alongside a body input.
+pub fn validate_uniform_group(
+    node: &RawNode,
+    indices: &[usize],
+    required: &[usize],
+) -> Result<(), ProcessError> {
+    for &index in required {
+        let provided = node.inputs.get(index).is_some_and(|arg| !arg.is_optional());
+        if !provided {
+            return Err(ProcessError::Custom(format!(
+                "Node '{}': input #{index} is required but was not provided",
+                node.name
+            )));
+        }
+    }
+
+    let mut first: Option<(usize, bool)> = None;
+    for &index in indices {
+        let Some(arg) = node.inputs.get(index) else {
+            continue;
+        };
+        if arg.is_optional() {
+            continue;
+        }
+        let runtime = arg.is_dynamic();
+        match first {
+            None => first = Some((index, runtime)),
+            Some((first_index, first_runtime)) if first_runtime != runtime => {
+                let (build, run) = if runtime {
+                    (first_index, index)
+                } else {
+                    (index, first_index)
+                };
+                return Err(ProcessError::Custom(format!(
+                    "Node '{}': input #{build} is a build-time value while input #{run} is \
+                     supplied at run time. They are consumed as a group, so they must both \
+                     be initializers or both be graph inputs.",
+                    node.name
+                )));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Lift the inputs at `indices` to static values, but only if every one of them can be.
+///
+/// Some operators split a group of inputs across the same piece of generated code, so
+/// codegen needs them to be uniformly static or uniformly named. Lifting only part of
+/// the group would leave the rest referring to an input whose name `to_static` cleared.
+/// Absent and optional inputs count as liftable, so a missing tail does not block the
+/// group.
+///
+/// Idempotent: `lift_constants` re-runs after no-op elimination
+/// (`phases/post_processing.rs`). An already-lifted input is `Static`, which is liftable
+/// in the sense that matters - it is already where this wants it - so a second pass over
+/// a fully lifted group is a no-op rather than an error.
+///
+/// Atomic: if any `to_static` fails, the group is restored, so a caller that logs the
+/// error rather than propagating it does not observe a half-lifted node.
+pub fn lift_all_or_none(node: &mut RawNode, indices: &[usize]) -> Result<(), ProcessError> {
+    let liftable = |index: &usize| match node.inputs.get(*index) {
+        Some(arg) => arg.is_optional() || arg.is_constant() || arg.is_static(),
+        None => true,
+    };
+    if !indices.iter().all(liftable) {
+        return Ok(());
+    }
+
+    let to_lift: Vec<usize> = indices
+        .iter()
+        .copied()
+        .filter(|&index| node.inputs.get(index).is_some_and(|arg| arg.is_constant()))
+        .collect();
+    let restore: Vec<Argument> = to_lift
+        .iter()
+        .map(|&index| node.inputs[index].clone())
+        .collect();
+
+    for &index in &to_lift {
+        if let Err(e) = node.inputs[index].to_static() {
+            for (&index, arg) in to_lift.iter().zip(restore) {
+                node.inputs[index] = arg;
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+// ============================================================================
+// NodeSpec Validation
+// ============================================================================
+
+/// Validate node against its specification
+pub fn validate_node_spec(
+    node: &RawNode,
+    opset: usize,
+    spec: &NodeSpec,
+) -> Result<(), ProcessError> {
+    // Validate opset version
+    if opset < spec.min_opset {
+        return Err(ProcessError::UnsupportedOpset {
+            required: spec.min_opset,
+            actual: opset,
+        });
+    }
+    if let Some(max) = spec.max_opset
+        && opset > max
+    {
+        return Err(ProcessError::UnsupportedOpset {
+            required: max,
+            actual: opset,
+        });
+    }
+
+    // Validate input count
+    validate_input_spec(node, opset, &spec.inputs)?;
+
+    // Validate output count
+    validate_output_spec(node, opset, &spec.outputs)?;
+
+    Ok(())
+}
+
+/// Validate input count against specification
+fn validate_input_spec(node: &RawNode, opset: usize, spec: &InputSpec) -> Result<(), ProcessError> {
+    // Use __onnx_input_count if available (for control flow nodes with outer-scope refs)
+    // This ensures we only validate the original ONNX inputs, not extra scope refs
+    let actual = get_onnx_input_count(node);
+
+    match spec {
+        InputSpec::Exact(expected) => {
+            if actual != *expected {
+                return Err(ProcessError::InvalidInputCount {
+                    expected: *expected,
+                    actual,
+                });
+            }
+        }
+        InputSpec::AtLeast(min) => {
+            if actual < *min {
+                return Err(ProcessError::InvalidInputCount {
+                    expected: *min,
+                    actual,
+                });
+            }
+        }
+        InputSpec::Range(min, max) => {
+            if actual < *min || actual > *max {
+                return Err(ProcessError::InvalidInputCount {
+                    expected: *min, // Report minimum as expected
+                    actual,
+                });
+            }
+        }
+        InputSpec::OpsetDependent(specs) => {
+            // Find the applicable spec for this opset (use the highest opset <= current)
+            let applicable_spec = specs
+                .iter()
+                .filter(|(opset_version, _)| *opset_version <= opset)
+                .max_by_key(|(opset_version, _)| opset_version)
+                .map(|(_, spec)| spec);
+
+            if let Some(spec) = applicable_spec {
+                validate_input_spec(node, opset, spec)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate output count against specification
+fn validate_output_spec(
+    node: &RawNode,
+    opset: usize,
+    spec: &OutputSpec,
+) -> Result<(), ProcessError> {
+    let actual = node.outputs.len();
+
+    match spec {
+        OutputSpec::Exact(expected) => {
+            if actual != *expected {
+                return Err(ProcessError::InvalidOutputCount {
+                    expected: *expected,
+                    actual,
+                });
+            }
+        }
+        OutputSpec::Range(min, max) => {
+            if actual < *min || actual > *max {
+                return Err(ProcessError::InvalidOutputCount {
+                    expected: *min, // Report minimum as expected
+                    actual,
+                });
+            }
+        }
+        OutputSpec::OpsetDependent(specs) => {
+            // Find the applicable spec for this opset (use the highest opset <= current)
+            let applicable_spec = specs
+                .iter()
+                .filter(|(opset_version, _)| *opset_version <= opset)
+                .max_by_key(|(opset_version, _)| opset_version)
+                .map(|(_, spec)| spec);
+
+            if let Some(spec) = applicable_spec {
+                validate_output_spec(node, opset, spec)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Get the count of original ONNX inputs (excluding outer-scope references)
+///
+/// For control flow nodes (If, Loop, Scan), outer-scope references used by subgraphs
+/// are added as additional inputs during node conversion. The `__onnx_input_count`
+/// attribute stores how many inputs are "real" ONNX inputs. This function returns
+/// that count, or falls back to the total input count if the attribute isn't present.
+pub(crate) fn get_onnx_input_count(node: &RawNode) -> usize {
+    use crate::ir::AttributeValue;
+    match node.attrs.get("__onnx_input_count") {
+        Some(AttributeValue::Int64(n)) => *n as usize,
+        Some(other) => {
+            log::warn!(
+                "__onnx_input_count attribute has unexpected type {:?} in node '{}', falling back to inputs.len()",
+                other,
+                node.name
+            );
+            node.inputs.len()
+        }
+        None => node.inputs.len(),
+    }
+}
+
+/// Build outer scope arguments map from additional inputs added during node conversion.
+///
+/// During node conversion, outer-scope references used by subgraphs are extracted
+/// and added as additional inputs to If/Loop/Scan nodes. The `__onnx_input_count`
+/// attribute stores how many of the inputs are "real" ONNX inputs. Inputs beyond
+/// that count are outer-scope references with resolved types.
+///
+/// The `__scope_ref_names` attribute stores the original sanitized ONNX names
+/// for these scope refs, which are needed because subgraphs reference these
+/// original names, not the renamed node output names.
+///
+/// Returns full Arguments (not just types) to preserve constant values for LSTM weights etc.
+pub fn build_outer_scope_from_inputs(node: &RawNode) -> crate::ir::OuterScopeTypes {
+    use crate::ir::AttributeValue;
+
+    let onnx_input_count = get_onnx_input_count(node);
+
+    // Get the original ONNX names for the scope refs
+    let scope_ref_names: Vec<String> = node
+        .attrs
+        .get("__scope_ref_names")
+        .and_then(|v| match v {
+            AttributeValue::Strings(names) => Some(names.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    // Build outer scope map using original names and full arguments from inputs
+    let mut outer_scope: HashMap<String, crate::ir::Argument> = HashMap::new();
+    let scope_ref_inputs: Vec<_> = node.inputs.iter().skip(onnx_input_count).collect();
+
+    for (i, input) in scope_ref_inputs.iter().enumerate() {
+        // Use the original ONNX name if available, otherwise fall back to input name
+        let name = scope_ref_names
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| input.name.clone());
+        log::debug!(
+            "Adding outer-scope arg: {} -> type={:?}, value_source={:?}, has_store={}",
+            name,
+            input.ty,
+            input.value_source,
+            input.value_store.is_some()
+        );
+        // Clone the full Argument to preserve value_source and value_store
+        outer_scope.insert(name, (*input).clone());
+    }
+
+    outer_scope
+}
+
+/// Copy input type to output (for operations that preserve type)
+pub fn same_as_input(node: &mut RawNode) {
+    node.outputs[0].ty = node.inputs[0].ty.clone();
+}
+
+/// Compute broadcast output rank from multiple inputs
+pub fn compute_broadcast_rank(inputs: &[crate::ir::Argument]) -> usize {
+    use crate::ir::ArgType;
+    use core::cmp::max;
+
+    inputs.iter().fold(0, |acc, input| match &input.ty {
+        ArgType::Tensor(tensor) => max(acc, tensor.rank),
+        ArgType::ScalarTensor(_) => max(acc, 1),
+        ArgType::ScalarNative(_) => acc,
+        ArgType::Shape(_) => max(acc, 1),
+    })
+}
+
+/// Compute broadcast static shape from multiple inputs (NumPy-style broadcasting)
+pub fn compute_broadcast_static_shape(
+    inputs: &[crate::ir::Argument],
+) -> Option<Vec<Option<usize>>> {
+    let static_shapes: Vec<_> = inputs
+        .iter()
+        .filter_map(|input| input.ty.static_shape().cloned())
+        .collect();
+
+    if static_shapes.is_empty() {
+        return None;
+    }
+
+    if static_shapes.len() == 1 {
+        let broadcast_rank = compute_broadcast_rank(inputs);
+        if broadcast_rank == static_shapes[0].len() {
+            return Some(static_shapes[0].clone());
+        }
+        return None;
+    }
+
+    if static_shapes.windows(2).all(|w| w[0] == w[1]) {
+        return Some(static_shapes[0].clone());
+    }
+
+    let max_rank = static_shapes.iter().map(|s| s.len()).max()?;
+    let mut result: Vec<Option<usize>> = vec![Some(1); max_rank];
+
+    for shape in &static_shapes {
+        let offset = max_rank - shape.len();
+        for (i, dim) in shape.iter().enumerate() {
+            let result_idx = offset + i;
+            match (result[result_idx], *dim) {
+                (_, None) | (None, _) => {
+                    // If either dim is symbolic, result is symbolic
+                    result[result_idx] = None;
+                }
+                (Some(cur), Some(d)) => {
+                    if cur == 1 {
+                        result[result_idx] = Some(d);
+                    } else if d != 1 && d != cur {
+                        // Incompatible broadcast
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    Some(result)
+}
+
+/// Compute the broadcast output ArgType for a set of inputs.
+///
+/// Rules:
+/// - Shape + no real Tensor -> Shape
+/// - All rank-0 (ScalarNative) -> ScalarNative(output_dtype)
+/// - All on-device rank-1 with no real Tensor -> ScalarTensor(output_dtype)
+/// - Otherwise -> Tensor(output_dtype, max_rank)
+///
+/// `output_dtype` is the dtype to use for the output. Pass `None` to infer
+/// from the inputs (first on-device element type). Pass `Some(dtype)` to
+/// override (e.g., `DType::Bool` for comparison ops).
+pub fn broadcast_output_type(
+    inputs: &[crate::ir::Argument],
+    output_dtype: Option<crate::ir::DType>,
+) -> crate::ir::ArgType {
+    use crate::ir::ArgType;
+
+    let has_real_tensor = inputs
+        .iter()
+        .any(|input| matches!(&input.ty, ArgType::Tensor(_)));
+
+    let has_shape = inputs
+        .iter()
+        .any(|input| matches!(&input.ty, ArgType::Shape(_)));
+
+    if has_shape && !has_real_tensor {
+        let shape_rank = inputs
+            .iter()
+            .find_map(|input| match &input.ty {
+                ArgType::Shape(rank) => Some(*rank),
+                _ => None,
+            })
+            .expect("Shape input must exist");
+
+        return ArgType::Shape(shape_rank);
+    }
+
+    let max_rank = compute_broadcast_rank(inputs);
+
+    let dtype = output_dtype.unwrap_or_else(|| {
+        inputs
+            .iter()
+            .find_map(|input| match &input.ty {
+                ArgType::Tensor(tensor) => Some(tensor.dtype),
+                ArgType::ScalarTensor(dtype) => Some(*dtype),
+                _ => None,
+            })
+            .unwrap_or_else(|| inputs[0].ty.elem_type())
+    });
+
+    if max_rank == 0 {
+        ArgType::ScalarNative(dtype)
+    } else if !has_real_tensor && max_rank == 1 {
+        ArgType::ScalarTensor(dtype)
+    } else {
+        let static_shape = compute_broadcast_static_shape(inputs);
+        ArgType::Tensor(crate::ir::TensorType {
+            dtype,
+            rank: max_rank,
+            static_shape,
+        })
+    }
+}
+
+/// Update output type for broadcasting operations to max input rank
+pub fn same_as_input_broadcast(node: &mut RawNode) {
+    node.outputs[0].ty = broadcast_output_type(&node.inputs, None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{ArgType, Argument, DType, NodeType, RawNode, TensorType};
+    use crate::registry::ProcessorRegistry;
+
+    struct TestProcessor;
+
+    impl NodeProcessor for TestProcessor {
+        type Config = ();
+
+        fn infer_types(
+            &self,
+            node: &mut RawNode,
+            _opset: usize,
+            _output_preferences: &OutputPreferences,
+        ) -> Result<(), ProcessError> {
+            // Simple test: copy input type to output
+            if !node.inputs.is_empty() && !node.outputs.is_empty() {
+                node.outputs[0].ty = node.inputs[0].ty.clone();
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_infer_outputs() {
+        let processor = TestProcessor;
+        let prefs = OutputPreferences::new();
+        let mut node = RawNode {
+            custom_identity: None,
+            node_type: NodeType::Add,
+            name: "test_node".to_string(),
+            inputs: vec![Argument {
+                name: "input".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 2,
+                    static_shape: None,
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            }],
+            outputs: vec![Argument {
+                name: "output".to_string(),
+                ty: ArgType::default(),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            }],
+            attrs: Default::default(),
+        };
+
+        NodeProcessor::infer_types(&processor, &mut node, 16, &prefs).unwrap();
+
+        // Output should match input type
+        assert_eq!(node.outputs[0].ty, node.inputs[0].ty);
+    }
+
+    #[test]
+    fn test_processor_registry() {
+        let mut registry = ProcessorRegistry::new();
+
+        // Register a processor
+        registry.register(NodeType::Add, Box::new(TestProcessor));
+
+        // Verify the processor is registered by checking the type
+        let add_processor = registry.get(&NodeType::Add);
+        let sub_processor = registry.get(&NodeType::Sub);
+
+        // Add should return our TestProcessor (we can't directly check type, but can verify behavior)
+        // Sub should return DefaultProcessor since it's not registered
+        // Both should be valid processor references
+        assert!(std::ptr::addr_of!(*add_processor) != std::ptr::addr_of!(*sub_processor));
+    }
+
+    #[test]
+    fn test_default_processor() {
+        let processor = DefaultProcessor;
+        let prefs = OutputPreferences::new();
+        let mut node = RawNode {
+            custom_identity: None,
+            node_type: NodeType::Relu,
+            name: "test_relu".to_string(),
+            inputs: vec![Argument {
+                name: "input".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 3,
+                    static_shape: None,
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            }],
+            outputs: vec![Argument {
+                name: "output".to_string(),
+                ty: ArgType::default(),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            }],
+            attrs: Default::default(),
+        };
+
+        NodeProcessor::infer_types(&processor, &mut node, 16, &prefs).unwrap();
+
+        // Default processor should preserve input type
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.rank, 3);
+                assert_eq!(t.dtype, DType::F32);
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_broadcast_static_shape_rank_mismatch_returns_none() {
+        // Regression: when only one input has a static shape but its rank
+        // doesn't match the broadcast rank, we should return None instead
+        // of incorrectly propagating the shape.
+        let inputs = vec![
+            Argument {
+                name: "a".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 1,
+                    static_shape: Some(vec![Some(2)]),
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            },
+            Argument {
+                name: "b".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 4,
+                    static_shape: None,
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            },
+        ];
+
+        // Broadcast rank is 4, but only static shape is [2] (rank 1). Should be None.
+        let result = compute_broadcast_static_shape(&inputs);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_broadcast_static_shape_matching_rank() {
+        // When one input has a static shape matching the broadcast rank, use it.
+        let inputs = vec![
+            Argument {
+                name: "a".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 3,
+                    static_shape: Some(vec![Some(2), Some(3), Some(4)]),
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            },
+            Argument {
+                name: "b".to_string(),
+                ty: ArgType::Tensor(TensorType {
+                    dtype: DType::F32,
+                    rank: 3,
+                    static_shape: None,
+                }),
+                value_source: crate::ir::ValueSource::Dynamic,
+                value_store: None,
+            },
+        ];
+
+        let result = compute_broadcast_static_shape(&inputs);
+        assert_eq!(result, Some(vec![Some(2), Some(3), Some(4)]));
+    }
+}
+
+#[cfg(test)]
+mod lift_all_or_none_tests {
+    use super::lift_all_or_none;
+    use crate::ir::NodeType;
+    use crate::node::test_utils::TestNodeBuilder;
+
+    /// A group whose tail is simply absent still lifts: "missing" is not "unliftable".
+    #[test]
+    fn absent_tail_does_not_block_the_group() {
+        let mut node = TestNodeBuilder::new(NodeType::Gru, "test_gru")
+            .input_tensor_f32("X", 3, Some(vec![10, 2, 4]))
+            .input_tensor_f32_data("W", vec![0.0; 12], vec![1, 3, 4])
+            .input_tensor_f32_data("R", vec![0.0; 9], vec![1, 3, 3])
+            .output_tensor_f32("Y", 4, None)
+            .build_with_graph_data(14);
+
+        lift_all_or_none(&mut node, &[1, 2, 3]).unwrap();
+
+        assert!(node.inputs[1].is_static());
+        assert!(node.inputs[2].is_static());
+    }
+
+    /// The second `lift_constants` pass sees `Static`, not `Constant`, and must leave the
+    /// group alone rather than erroring on it.
+    #[test]
+    fn lifting_twice_is_a_no_op() {
+        let mut node = TestNodeBuilder::new(NodeType::Gru, "test_gru")
+            .input_tensor_f32("X", 3, Some(vec![10, 2, 4]))
+            .input_tensor_f32_data("W", vec![0.0; 12], vec![1, 3, 4])
+            .input_tensor_f32_data("R", vec![0.0; 9], vec![1, 3, 3])
+            .output_tensor_f32("Y", 4, None)
+            .build_with_graph_data(14);
+
+        lift_all_or_none(&mut node, &[1, 2, 3]).unwrap();
+        let after_first = node.inputs[1].value_source;
+
+        lift_all_or_none(&mut node, &[1, 2, 3]).expect("a second pass must not error");
+
+        assert_eq!(node.inputs[1].value_source, after_first);
+    }
+}

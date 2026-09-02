@@ -1,0 +1,143 @@
+#!/usr/bin/env -S uv run --script
+
+# /// script
+# dependencies = [
+#   "onnx==1.19.0",
+#   "numpy",
+# ]
+# ///
+
+# used to generate model: onnx-tests/tests/slice/slice_with_steps.onnx
+
+import numpy as np
+import onnx
+from onnx import helper, TensorProto
+from onnx.reference import ReferenceEvaluator
+
+# ONNX sentinel meaning "past the first element" for a reverse slice.
+INT64_MIN = -9223372036854775808
+
+
+def main() -> None:
+    # Starts
+    # dim2 walks backwards from the last index, so it starts at 11, not 0.
+    starts_val = [0, 1, 11]
+    starts_tensor = helper.make_tensor(
+        name="starts",
+        data_type=TensorProto.INT64,
+        dims=[len(starts_val)],
+        vals=starts_val,
+    )
+    starts_node = helper.make_node(
+        "Constant",
+        name="starts_constant",
+        inputs=[],
+        outputs=["starts"],
+        value=starts_tensor,
+    )
+
+    # Ends
+    # For step < 0 ONNX stops *before* `ends`, so reaching index 0 needs the
+    # INT64_MIN sentinel; an ends of 12 would select nothing at all.
+    ends_val = [10, 8, INT64_MIN]
+    ends_tensor = helper.make_tensor(
+        name="ends",
+        data_type=TensorProto.INT64,
+        dims=[len(ends_val)],
+        vals=ends_val,
+    )
+    ends_node = helper.make_node(
+        "Constant",
+        name="ends_constant",
+        inputs=[],
+        outputs=["ends"],
+        value=ends_tensor,
+    )
+
+    # Axes
+    axes_val = [0, 1, 2]
+    axes_tensor = helper.make_tensor(
+        name="axes",
+        data_type=TensorProto.INT64,
+        dims=[len(axes_val)],
+        vals=axes_val,
+    )
+    axes_node = helper.make_node(
+        "Constant",
+        name="axes_constant",
+        inputs=[],
+        outputs=["axes"],
+        value=axes_tensor,
+    )
+
+    # Steps - non-trivial values
+    steps_val = [
+        2,
+        3,
+        -1,
+    ]  # step=2 for dim0, step=3 for dim1, step=-1 (reverse) for dim2
+    steps_tensor = helper.make_tensor(
+        name="steps",
+        data_type=TensorProto.INT64,
+        dims=[len(steps_val)],
+        vals=steps_val,
+    )
+    steps_node = helper.make_node(
+        "Constant",
+        name="steps_constant",
+        inputs=[],
+        outputs=["steps"],
+        value=steps_tensor,
+    )
+
+    # Define the Slice node that uses the outputs from the constant nodes
+    slice_node = helper.make_node(
+        "Slice",
+        name="slice_node",
+        inputs=["input_tensor", "starts", "ends", "axes", "steps"],
+        outputs=["output"],
+    )
+
+    # Create the graph
+    graph_def = helper.make_graph(
+        nodes=[starts_node, ends_node, axes_node, steps_node, slice_node],
+        name="SliceWithStepsGraph",
+        inputs=[
+            helper.make_tensor_value_info(
+                "input_tensor", TensorProto.FLOAT, [10, 10, 12]
+            ),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("output", TensorProto.FLOAT, [5, 3, 12])
+            # dim0: (10-0+1)/2 = 5 elements (indices: 0,2,4,6,8)
+            # dim1: (8-1+2)/3 = 3 elements (indices: 1,4,7)
+            # dim2: 12 elements with step=-1 (reverse order)
+        ],
+    )
+
+    # Create the model
+    model_def = helper.make_model(graph_def, producer_name="slice_with_steps")
+
+    onnx.checker.check_model(model_def)
+
+    # Save the model to a file
+    onnx.save(model_def, "slice_with_steps.onnx")
+
+    # Match the input the Rust test builds, so the printed values are the
+    # ground truth its assertions are checked against.
+    test_input = np.array(
+        [
+            [[i * 100 + j * 10 + k for k in range(12)] for j in range(10)]
+            for i in range(10)
+        ],
+        dtype=np.float32,
+    )
+    result = ReferenceEvaluator(model_def).run(None, {"input_tensor": test_input})[0]
+    print(f"Output shape: {result.shape}")
+    print(f"result[0, 0] = {result[0, 0]}")
+    print(f"result[0, 1, 0] = {result[0, 1, 0]}")
+    print(f"result[1, 0, 0] = {result[1, 0, 0]}")
+
+
+if __name__ == "__main__":
+    main()

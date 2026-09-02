@@ -1,0 +1,23 @@
+[package]
+name = "onnx-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["test-flex"]
+test-wgpu = ["burn/wgpu"]
+test-flex = ["burn/flex"]
+test-tch = ["burn/tch"]
+test-metal = ["burn/metal"]
+
+[dev-dependencies]
+burn = { workspace = true }
+burn-store = { workspace = true, features = ["std"] }
+serde = { workspace = true }
+float-cmp = { workspace = true }
+insta = { workspace = true }
+half = { workspace = true }
+
+[build-dependencies]
+burn-onnx = { workspace = true, features = ["default"] }

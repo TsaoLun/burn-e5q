@@ -1,0 +1,122 @@
+use crate::include_models;
+include_models!(
+    unsqueeze_like,
+    unsqueeze_runtime_axes,
+    unsqueeze_int_to_shape,
+    squeeze_unsqueeze_roundtrip,
+    unsqueeze_scalar_axes,
+    unsqueeze_shape_input
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burn::tensor::{Device, Shape, Tensor};
+
+    #[test]
+    fn unsqueeze_runtime_axes() {
+        let device = Default::default();
+        let model: unsqueeze_runtime_axes::Model = unsqueeze_runtime_axes::Model::new(&device);
+        let input_shape = Shape::from([3, 4, 5]);
+        let expected_shape = Shape::from([1, 3, 1, 4, 5, 1]);
+        let input = Tensor::ones(input_shape, &device);
+
+        // Note: The axes tensor must have rank 1 with a single element
+        // as the generated ONNX requires a 1D tensor for static shape operations
+        // see unsqueeze.onnx
+        let axes = Tensor::from_ints([2], &device);
+        let output = model.forward(input, axes);
+        assert_eq!(output.shape(), expected_shape);
+    }
+
+    #[test]
+    fn unsqueeze_like() {
+        let device = Default::default();
+        let model = unsqueeze_like::Model::new(&device);
+        let input_shape = Shape::from([3, 4, 5]);
+        let expected_shape = Shape::from([3, 4, 5, 1]);
+        let input = Tensor::ones(input_shape, &device);
+        let output = model.forward(input, 1.0);
+        assert_eq!(expected_shape, output.0.shape());
+        assert_eq!(Shape::from([1]), output.1.shape());
+    }
+
+    #[test]
+    fn unsqueeze_int_to_shape() {
+        // Test the direct conversion of Int scalar to Shape array [i64; 1]
+        // This demonstrates the optimization where Int scalars are unsqueezed to Shape types
+        // rather than tensors, which is crucial for efficient dynamic shape operations
+        // The generated model takes an i64 scalar and returns a Shape array [i64; 1]
+        let device = Default::default();
+        let model = unsqueeze_int_to_shape::Model::new(&device);
+
+        // Input: scalar int64 value
+        let scalar_value = 42i64;
+
+        // Expected output: Shape array [i64; 1] containing the same value
+        let output_shape = model.forward(scalar_value);
+
+        // Verify the output is a Shape array with our input value
+        assert_eq!(output_shape[0], scalar_value);
+
+        // This shows that the optimization is working:
+        // The Int scalar is directly converted to a Shape array without tensor allocation
+    }
+
+    #[test]
+    fn squeeze_unsqueeze_roundtrip() {
+        // Test the complete roundtrip: Tensor<1> -> squeeze -> Scalar -> unsqueeze -> Tensor<1>
+        // This verifies that the squeeze/unsqueeze operations are symmetric and maintain
+        // type consistency for shape manipulation patterns common in ONNX models
+        let device = Default::default();
+        let model = squeeze_unsqueeze_roundtrip::Model::new(&device);
+
+        // Input: 1D tensor with a value
+        let input_value = 256i64;
+        let input_tensor = Tensor::<1, burn::tensor::Int>::from_data([input_value], &device);
+
+        // The roundtrip should preserve the value
+        // Note: The output is a Shape type [i64; 1], not a Tensor
+        let output_shape = model.forward(input_tensor.clone());
+
+        // Verify the value is preserved through the squeeze/unsqueeze roundtrip
+        assert_eq!(output_shape[0], input_value);
+    }
+
+    #[test]
+    fn unsqueeze_shape_input() {
+        // Test Unsqueeze where the data input is a Shape type (from Shape op)
+        // Reproduces issue #258: bodyposenet fails because Shape -> Unsqueeze was rejected
+        let device = Default::default();
+        let model = unsqueeze_shape_input::Model::new(&device);
+
+        // Input: 2D float tensor [2, 3]
+        let input = Tensor::<2>::ones([2, 3], &device);
+
+        // Output should be the shape [2, 3] unsqueezed to [[2, 3]] (shape [1, 2])
+        let output = model.forward(input);
+
+        assert_eq!(output.shape(), Shape::from([1, 2]));
+        // ONNX Shape returns int64, and Unsqueeze preserves that, so the model output is
+        // I64. Compare against an explicitly-I64 TensorData rather than relying on the
+        // backend's default int element.
+        let expected = burn::tensor::TensorData::from([[2i64, 3]]);
+        output.to_data().assert_eq(&expected, true);
+    }
+
+    #[test]
+    fn unsqueeze_scalar_axes() {
+        // Test Unsqueeze with scalar axes input (not 1D tensor)
+        // This verifies the fix for scalar axes handling in extract_config
+        let device = Default::default();
+        let model = unsqueeze_scalar_axes::Model::new(&device);
+
+        // Input: 2D tensor [3, 4]
+        let input = Tensor::<2>::ones([3, 4], &device);
+
+        // Output should be 3D tensor [1, 3, 4] after unsqueeze at axis 0
+        let output = model.forward(input);
+
+        assert_eq!(output.shape(), Shape::from([1, 3, 4]));
+    }
+}

@@ -1,0 +1,331 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Cargo.lock'
+      - '**.rs'
+      - '**.sh'
+      - '**.ps1'
+      - '**.yml'
+      - '**.toml'
+      - '!**.md'
+      - '!LICENSE-APACHE'
+      - '!LICENSE-MIT'
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'Cargo.lock'
+      - '**.rs'
+      - '**.sh'
+      - '**.ps1'
+      - '**.yml'
+      - '**.toml'
+      - '!**.md'
+      - '!LICENSE-APACHE'
+      - '!LICENSE-MIT'
+
+env:
+  RUST_PREVIOUS_VERSION: 1.95.0
+  # Test in release mode (make it an empty string to test in debug mode)
+  TEST_RELEASE_FLAG: "--release"
+  # Crates excluded from CI builds/tests:
+  # - model-checks: require externally downloaded ONNX files
+  # - onnx-official-tests: has its own dedicated job (see below)
+  # - raspberry-pi-pico: embedded no_std example, requires ARM target
+  # - image-classification-web: enables the `webgpu` burn feature which, under
+  #   workspace feature unification, switches the default backend to cubecl/wgpu
+  #   inside other crates' test binaries. cubecl's Bool path then rejects
+  #   `Bool(Native)` tensor data and several onnx-tests panic. Building it on
+  #   its own (or via `cargo check -p image-classification-web`) is fine.
+  CI_EXCLUDE: "burn-onnx-model-checks-*,model-checks-common,onnx-official-tests,raspberry-pi-pico,image-classification-web"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-checks:
+    runs-on: ubuntu-latest
+    outputs:
+      rust-prev-version: ${{ env.RUST_PREVIOUS_VERSION }}
+    steps:
+      - name: Do Nothing
+        if: false
+        run: echo
+
+  code-quality:
+    runs-on: ubuntu-22.04
+    needs: prepare-checks
+    strategy:
+      matrix:
+        rust: [stable]
+        include:
+          - rust: stable
+            toolchain: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ""
+          shared-key: ${{ matrix.rust }}-linux
+      # --------------------------------------------------------------------------------
+      - name: Audit
+        run: xtask check audit
+      # --------------------------------------------------------------------------------
+      - name: Format
+        shell: bash
+        env:
+          # work around for colors
+          # see: https://github.com/rust-lang/rustfmt/issues/3385
+          TERM: xterm-256color
+        run: xtask check format
+      # --------------------------------------------------------------------------------
+      - name: Lint
+        run: xtask check lint
+      # --------------------------------------------------------------------------------
+      - name: Typos
+        uses: tracel-ai/github-actions/check-typos@v11
+
+  documentation:
+    runs-on: ubuntu-22.04
+    needs: prepare-checks
+    strategy:
+      matrix:
+        rust: [stable]
+        include:
+          - rust: stable
+            toolchain: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ""
+          shared-key: ${{ matrix.rust }}-linux
+      # --------------------------------------------------------------------------------
+      - name: Documentation Build
+        run: cargo doc --workspace --no-deps --color=always --exclude 'burn-onnx-model-checks-*' --exclude model-checks-common --exclude raspberry-pi-pico
+      # --------------------------------------------------------------------------------
+      - name: Documentation Tests
+        run: cargo test --workspace --doc --color always --exclude 'burn-onnx-model-checks-*' --exclude model-checks-common --exclude raspberry-pi-pico
+
+  linux-std-tests:
+    runs-on: ubuntu-22.04
+    needs: [prepare-checks, code-quality]
+    env:
+      DISABLE_WGPU_SPIRV: '1'
+      # disable incremental compilation (reduces artifact size)
+      CARGO_PROFILE_TEST_INCREMENTAL: 'false'
+    strategy:
+      matrix:
+        rust: [stable, prev]
+        include:
+          - rust: stable
+            toolchain: stable
+            # coverage: --enable-coverage
+          - rust: prev
+            toolchain: ${{ needs.prepare-checks.outputs.rust-prev-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ""
+          shared-key: ${{ matrix.rust }}-linux
+          # Disable cache on linux-std (stable) runner which currently always runs out of disk space with tests + coverage
+          enable-cache: ${{ matrix.rust != 'stable' }}
+      - name: Tests
+        run: xtask test ${{ env.TEST_RELEASE_FLAG }} -x ${{ env.CI_EXCLUDE }}
+
+  linux-no-std-tests:
+    runs-on: ubuntu-22.04
+    needs: [prepare-checks, code-quality]
+    strategy:
+      matrix:
+        rust: [stable, prev]
+        include:
+          - rust: stable
+            toolchain: stable
+          - rust: prev
+            toolchain: ${{ needs.prepare-checks.outputs.rust-prev-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ""
+          shared-key: ${{ matrix.rust }}-linux-no-std
+      # --------------------------------------------------------------------------------
+      - name: Crates Build
+        run: xtask --context no-std build -x ${{ env.CI_EXCLUDE }}
+      # --------------------------------------------------------------------------------
+      - name: Crates Tests
+        run: xtask --context no-std test ${{ env.TEST_RELEASE_FLAG }} -x ${{ env.CI_EXCLUDE }}
+
+  windows-std-tests:
+    runs-on: windows-2022
+    needs: [prepare-checks, code-quality]
+    # Keep the stragegy to be able to easily add new rust versions if required
+    strategy:
+      matrix:
+        rust: [stable]
+        include:
+          - rust: stable
+            toolchain: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: ${{ matrix.toolchain }}
+          cache-key: ""
+          shared-key: ${{ matrix.rust }}-windows
+      # --------------------------------------------------------------------------------
+      - name: Tests
+        run: xtask test ${{ env.TEST_RELEASE_FLAG }} -x ${{ env.CI_EXCLUDE }}
+
+  onnx-export-tests:
+    # Export requires burn's graph-capture feature and python for ONNX checks,
+    # so it is opt-in and tested separately from the released import stack.
+    # ort rc.13 downloads ONNX Runtime 1.28 binaries built against glibc 2.38+
+    # and a newer libstdc++; Ubuntu 22.04 only provides glibc 2.35.
+    runs-on: ubuntu-24.04
+    needs: [prepare-checks, code-quality]
+    env:
+      CARGO_PROFILE_TEST_INCREMENTAL: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v9
+        with:
+          rust-toolchain: stable
+          cache-key: ""
+          shared-key: stable-linux-onnx-export
+      # --------------------------------------------------------------------------------
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-python: true
+      # --------------------------------------------------------------------------------
+      - name: Install ONNX checker
+        run: |
+          uv venv "$RUNNER_TEMP/onnx-venv"
+          uv pip install --python "$RUNNER_TEMP/onnx-venv/bin/python" onnx
+          echo "$RUNNER_TEMP/onnx-venv/bin" >> "$GITHUB_PATH"
+      # --------------------------------------------------------------------------------
+      - name: Export tests
+        env:
+          BURN_ONNX_PYTHON_REQUIRED: '1'
+        run: cargo test -p burn-onnx --no-default-features --features export ${{ env.TEST_RELEASE_FLAG }}
+      # --------------------------------------------------------------------------------
+      - name: Combined import and export check
+        run: cargo check -p burn-onnx --features export
+
+  onnx-official-tests:
+    # Dedicated regression gate against the upstream ONNX backend test
+    # suite vendored under crates/onnx-official-tests/. Kept separate
+    # from linux-std-tests so the gate produces its own visible PR check
+    # and so future op-prefix sharding (tracked in #315 M3) can land as
+    # a small change to this job rather than a workflow restructure.
+    #
+    # Linux-only by design: the crate is platform-agnostic Rust + burn
+    # tensor math, so Windows/macOS coverage adds cost without catching
+    # anything the std jobs above do not already catch via the rest of
+    # the workspace.
+    runs-on: ubuntu-22.04
+    needs: [prepare-checks, code-quality]
+    # fetch-depth: 0 is required so that `git show origin/main:...`
+    # inside the expectations-delta step below can reach the base
+    # branch's tree. Default fetch-depth of 1 would produce a shallow
+    # clone that does not contain origin/main.
+    env:
+      CARGO_PROFILE_TEST_INCREMENTAL: 'false'
+    permissions:
+      # Required for the expectations-delta step to post a PR comment.
+      # No effect on push events because the step itself is gated on
+      # `github.event_name == 'pull_request'`.
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # --------------------------------------------------------------------------------
+      - name: Install Rust
+        uses: tracel-ai/github-actions/install-rust@v11
+        with:
+          rust-toolchain: stable
+          cache-key: ""
+          shared-key: stable-linux
+      # --------------------------------------------------------------------------------
+      - name: Tests
+        run: cargo test -p onnx-official-tests ${{ env.TEST_RELEASE_FLAG }}
+      # --------------------------------------------------------------------------------
+      # M4: post the expectations.toml delta as a PR comment so
+      # contributors see at a glance which tests their change promoted,
+      # regressed, or reclassified. Only runs on pull_request events
+      # (push events to main have nothing to compare against) and only
+      # posts when the delta is non-empty (the xtask prints the sentinel
+      # string `_No changes._` for an empty diff, which we grep for
+      # to decide whether to post).
+      # The `if` condition has two guards:
+      #   1. pull_request event — push-to-main has no base to diff.
+      #   2. head.repo.fork == false — fork PRs run with a read-only
+      #      GITHUB_TOKEN and cannot post issue comments; attempting
+      #      would fail the job. Contributors from forks will not get
+      #      the auto-delta comment until a workflow_run-based
+      #      alternative lands as a follow-up.
+      # The `gh pr comment` call also has its own || fallback so an
+      # unexpected permission edge case (e.g. org-level restriction
+      # tightens, or branch protection changes) downgrades to a
+      # warning rather than failing the whole job.
+      - name: Expectations delta (diff against origin/main)
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          cargo xtask diff-expectations \
+            --base "origin/${PR_BASE_REF}" \
+            --format markdown \
+            > /tmp/expectations-delta.md 2> /tmp/expectations-delta.log || {
+              echo "::warning::diff-expectations failed; see log below"
+              cat /tmp/expectations-delta.log
+              exit 0
+            }
+          # Skip posting when the delta is empty. The xtask emits the
+          # literal `_No changes._` line for that case.
+          if grep -q '^_No changes\._$' /tmp/expectations-delta.md; then
+            echo "No expectations.toml delta against origin/${PR_BASE_REF}; skipping PR comment."
+            exit 0
+          fi
+          gh pr comment "${PR_NUMBER}" --body-file /tmp/expectations-delta.md --repo "${GITHUB_REPOSITORY}" || {
+            echo "::warning::failed to post PR comment; expectations delta follows"
+            cat /tmp/expectations-delta.md
+            exit 0
+          }

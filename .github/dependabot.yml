@@ -1,0 +1,19 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "tracel-ai/github-actions*"
+
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "crates/*"
+      - "crates/burn-onnx/*-tests"
+      - "xtask"
+    schedule:
+      interval: "weekly"
+

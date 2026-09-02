@@ -1,0 +1,37 @@
+[package]
+name = "burn-onnx-model-checks-kokoro"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+
+[features]
+default = ["flex"]
+flex = ["burn/flex"]
+tch = ["burn/tch"]
+wgpu = ["burn/wgpu", "burn/autotune", "burn/fusion"]
+metal = ["burn/metal", "burn/autotune", "burn/fusion"]
+
+# The bisect bin requires the debug ONNX (built with KOKORO_DEBUG=1) to
+# exist in OUT_DIR, so it is opt-in.
+bisect = []
+
+[dependencies]
+burn = { workspace = true }
+burn-store = { workspace = true, features = ["std"] }
+model-checks-common = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[build-dependencies]
+burn-onnx = { workspace = true, features = ["default"] }
+model-checks-common = { workspace = true }
+
+[[bin]]
+name = "burn-onnx-model-checks-kokoro"
+path = "src/main.rs"
+
+[[bin]]
+name = "kokoro-bisect"
+path = "src/bin/bisect.rs"
+required-features = ["bisect"]

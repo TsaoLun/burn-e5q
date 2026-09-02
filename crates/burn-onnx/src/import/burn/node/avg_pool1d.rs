@@ -1,0 +1,231 @@
+use super::prelude::*;
+
+impl NodeCodegen for onnx_ir::node::avg_pool1d::AveragePool1dNode {
+    fn inputs(&self) -> &[Argument] {
+        &self.inputs
+    }
+
+    fn outputs(&self) -> &[Argument] {
+        &self.outputs
+    }
+
+    fn field(&self) -> Option<Field> {
+        let name = Ident::new(&self.name, Span::call_site());
+        let kernel_size = self.config.kernel_size.to_tokens();
+        let strides = self.config.stride.to_tokens();
+        // count_include_pad is a no-op in burn whenever the padding comes out asymmetric,
+        // including PaddingConfig::Same on an odd total: the module materialises the pads as
+        // zeros and then pools with none, so they land in the divisor either way.
+        // See <https://github.com/tracel-ai/burn/issues/5450>.
+        let count_include_pad = self.config.count_include_pad;
+        let ceil_mode = self.config.ceil_mode;
+
+        let input_spatial = onnx_ir::node::padding::static_spatial_dims(&self.inputs[0].ty);
+        let padding = crate::burn::codegen::resolve_auto_pad_1d(
+            &self.config.auto_pad,
+            &self.config.padding,
+            input_spatial.as_deref(),
+            self.config.kernel_size,
+            self.config.stride,
+            self.config.dilation,
+        );
+
+        Some(Field::new(
+            self.name.clone(),
+            quote! {
+                AvgPool1d
+            },
+            quote! {
+                let #name = AvgPool1dConfig::new(#kernel_size)
+                    .with_stride(#strides)
+                    .with_padding(#padding)
+                    .with_count_include_pad(#count_include_pad)
+                    .with_ceil_mode(#ceil_mode)
+                    .init();
+            },
+        ))
+    }
+
+    fn forward(&self, scope: &mut ScopeAtPosition<'_>) -> TokenStream {
+        let input = scope.arg(self.inputs.first().unwrap());
+        let output = arg_to_ident(self.outputs.first().unwrap());
+        let field = Ident::new(&self.name, Span::call_site());
+
+        quote! {
+            let #output = self.#field.forward(#input);
+        }
+    }
+
+    fn register_imports(&self, imports: &mut BurnImports) {
+        imports.register("burn::nn::pool::AvgPool1d");
+        imports.register("burn::nn::pool::AvgPool1dConfig");
+        imports.register("burn::nn::PaddingConfig1d");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::*;
+    use burn::tensor::DType;
+    use insta::assert_snapshot;
+    use onnx_ir::node::avg_pool1d::{AveragePool1dNode, AveragePool1dNodeBuilder, AvgPool1dConfig};
+    use onnx_ir::padding::{AutoPad, PaddingConfig1d};
+
+    fn create_avg_pool1d_node(name: &str, ceil_mode: bool) -> AveragePool1dNode {
+        let config = AvgPool1dConfig::new(
+            3,
+            1,
+            PaddingConfig1d::Valid,
+            false,
+            1,
+            ceil_mode,
+            AutoPad::NotSet,
+        );
+
+        AveragePool1dNodeBuilder::new(name)
+            .input_tensor("input", 3, DType::F32)
+            .output_tensor("output", 3, DType::F32)
+            .config(config)
+            .build()
+    }
+
+    fn create_avg_pool1d_node_asymmetric(name: &str) -> AveragePool1dNode {
+        // Asymmetric padding: left=1, right=2
+        let config = AvgPool1dConfig::new(
+            3,
+            1,
+            PaddingConfig1d::Explicit(1, 2),
+            false,
+            1,
+            false,
+            AutoPad::NotSet,
+        );
+
+        AveragePool1dNodeBuilder::new(name)
+            .input_tensor("input", 3, DType::F32)
+            .output_tensor("output", 3, DType::F32)
+            .config(config)
+            .build()
+    }
+
+    #[test]
+    fn test_avg_pool1d_forward() {
+        let node = create_avg_pool1d_node("pool1", false);
+        let code = codegen_forward_default(&node);
+        assert_snapshot!(code, @r"
+        pub fn forward(&self, input: Tensor<3>) -> Tensor<3> {
+            let output = self.pool1.forward(input);
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_avg_pool1d_forward_with_clone() {
+        let node = create_avg_pool1d_node("pool1", false);
+        let code = codegen_forward_with_clone(&node);
+        assert_snapshot!(code, @r"
+        pub fn forward(&self, input: Tensor<3>) -> Tensor<3> {
+            let output = self.pool1.forward(input.clone());
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_avg_pool1d_field_init_ceil_mode_false() {
+        let node = create_avg_pool1d_node("pool1", false);
+        let code = codegen_field_init(&node);
+        assert_snapshot!(code, @r#"
+        let pool1 = AvgPool1dConfig::new(3)
+            .with_stride(1)
+            .with_padding(PaddingConfig1d::Valid)
+            .with_count_include_pad(false)
+            .with_ceil_mode(false)
+            .init();
+        "#);
+    }
+
+    #[test]
+    fn test_avg_pool1d_field_init_ceil_mode_true() {
+        let node = create_avg_pool1d_node("pool1", true);
+        let code = codegen_field_init(&node);
+        assert_snapshot!(code, @r#"
+        let pool1 = AvgPool1dConfig::new(3)
+            .with_stride(1)
+            .with_padding(PaddingConfig1d::Valid)
+            .with_count_include_pad(false)
+            .with_ceil_mode(true)
+            .init();
+        "#);
+    }
+
+    #[test]
+    fn test_avg_pool1d_field_init_auto_pad_same_upper() {
+        let config = AvgPool1dConfig::new(
+            3,
+            1,
+            PaddingConfig1d::Valid,
+            false,
+            1,
+            false,
+            AutoPad::SameUpper,
+        );
+        let node = AveragePool1dNodeBuilder::new("pool1")
+            .input_tensor_shape("input", vec![1, 3, 7], DType::F32)
+            .output_tensor("output", 3, DType::F32)
+            .config(config)
+            .build();
+        let code = codegen_field_init(&node);
+        assert_snapshot!(code, @r#"
+        let pool1 = AvgPool1dConfig::new(3)
+            .with_stride(1)
+            .with_padding(PaddingConfig1d::Explicit(1, 1))
+            .with_count_include_pad(false)
+            .with_ceil_mode(false)
+            .init();
+        "#);
+    }
+
+    #[test]
+    fn test_avg_pool1d_field_init_auto_pad_same_upper_dynamic() {
+        let config = AvgPool1dConfig::new(
+            3,
+            1,
+            PaddingConfig1d::Valid,
+            false,
+            1,
+            false,
+            AutoPad::SameUpper,
+        );
+        let node = AveragePool1dNodeBuilder::new("pool1")
+            .input_tensor("input", 3, DType::F32)
+            .output_tensor("output", 3, DType::F32)
+            .config(config)
+            .build();
+        let code = codegen_field_init(&node);
+        assert_snapshot!(code, @r#"
+        let pool1 = AvgPool1dConfig::new(3)
+            .with_stride(1)
+            .with_padding(PaddingConfig1d::Same)
+            .with_count_include_pad(false)
+            .with_ceil_mode(false)
+            .init();
+        "#);
+    }
+
+    #[test]
+    fn test_avg_pool1d_field_init_asymmetric_padding() {
+        let node = create_avg_pool1d_node_asymmetric("pool1");
+        let code = codegen_field_init(&node);
+        // Asymmetric padding is passed directly to the module
+        assert_snapshot!(code, @r"
+        let pool1 = AvgPool1dConfig::new(3)
+            .with_stride(1)
+            .with_padding(PaddingConfig1d::Explicit(1, 2))
+            .with_count_include_pad(false)
+            .with_ceil_mode(false)
+            .init();
+        ");
+    }
+}

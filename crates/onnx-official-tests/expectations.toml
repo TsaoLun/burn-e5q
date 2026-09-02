@@ -1,0 +1,5633 @@
+# Declarative expectations for the upstream ONNX backend node tests
+# vendored under `vendor/node/`. The runner consults this file to decide
+# whether each test is expected to pass, fail, or be skipped, and fails
+# CI on any drift between this file and reality.
+#
+# Source:    onnx v1.19.0 node tests (https://github.com/onnx/onnx)
+# Vendoring: bulk-copied via cargo xtask refresh-onnx-tests.
+#
+# Status values:
+#   pass         - codegen succeeds, compile succeeds, output matches reference
+#   skip-codegen - onnx2burn panics or refuses the model
+#   skip-compile - codegen succeeds but generated Rust does not compile
+#   fail-compare - compiles and runs but produces incorrect output
+#   flaky        - intermittent, ignored by the gate
+#
+# Optional fields: reason, tracking (issue/PR ref), wontfix (bool)
+#
+# Initial classification sourced from:
+#   - tracel-ai/burn-onnx#314 (skip-codegen list, ~656 entries)
+#   - tracel-ai/burn-onnx#311 (fail-compare list, ~181 entries)
+# Refresh with: cargo xtask refresh-onnx-tests --version <tag>
+
+[test_abs]
+status = "pass"
+
+[test_acos]
+status = "pass"
+
+[test_acos_example]
+status = "pass"
+
+[test_acosh]
+status = "pass"
+
+[test_acosh_example]
+status = "pass"
+
+[test_adagrad]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Adagrad used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_adagrad_multiple]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Adagrad used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_adam]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Adam used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_adam_multiple]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Adam used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_add]
+status = "pass"
+
+[test_add_bcast]
+status = "pass"
+
+[test_add_int16]
+status = "pass"
+
+[test_add_int8]
+status = "pass"
+
+[test_add_uint16]
+status = "pass"
+
+[test_add_uint32]
+status = "pass"
+
+[test_add_uint64]
+status = "pass"
+
+[test_add_uint8]
+status = "pass"
+
+[test_affine_grid_2d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): AffineGrid (node 'affinegrid1')"
+
+[test_affine_grid_2d_align_corners]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): AffineGrid (node 'affinegrid1')"
+
+[test_affine_grid_2d_align_corners_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build then_branch: Type inference failed: Node 'squeeze1' (Squeeze): Squeeze: Cannot infer output rank when axes is None and input tensor static shape is unknown\")"
+
+[test_affine_grid_2d_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build then_branch: Type inference failed: Node 'squeeze1' (Squeeze): Squeeze: Cannot infer output rank when axes is None and input tensor static shape is unknown\")"
+
+[test_affine_grid_3d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): AffineGrid (node 'affinegrid1')"
+
+[test_affine_grid_3d_align_corners]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): AffineGrid (node 'affinegrid1')"
+
+[test_affine_grid_3d_align_corners_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build then_branch: Type inference failed: Node 'squeeze1' (Squeeze): Squeeze: Cannot infer output rank when axes is None and input tensor static shape is unknown\")"
+
+[test_affine_grid_3d_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build then_branch: Type inference failed: Node 'squeeze1' (Squeeze): Squeeze: Cannot infer output rank when axes is None and input tensor static shape is unknown\")"
+
+[test_ai_onnx_ml_array_feature_extractor]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::ArrayFeatureExtractor used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_binarizer]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::Binarizer used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_label_encoder_string_int]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::LabelEncoder used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_label_encoder_string_int_no_default]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::LabelEncoder used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_label_encoder_tensor_mapping]
+status = "skip-codegen"
+reason = "called `Result::unwrap()` on an `Err` value: VariantNotFound(\"String tensors not supported\")"
+
+[test_ai_onnx_ml_label_encoder_tensor_value_only_mapping]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::LabelEncoder used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_tree_ensemble_set_membership]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::TreeEnsemble used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_ai_onnx_ml_tree_ensemble_single_tree]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.ml::TreeEnsemble used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_and2d]
+status = "pass"
+
+[test_and3d]
+status = "pass"
+
+[test_and4d]
+status = "pass"
+
+[test_and_bcast3v1d]
+status = "pass"
+
+[test_and_bcast3v2d]
+status = "pass"
+
+[test_and_bcast4v2d]
+status = "pass"
+
+[test_and_bcast4v3d]
+status = "pass"
+
+[test_and_bcast4v4d]
+status = "pass"
+
+[test_argmax_default_axis_example]
+status = "pass"
+
+[test_argmax_default_axis_example_select_last_index]
+status = "pass"
+
+[test_argmax_default_axis_random]
+status = "pass"
+
+[test_argmax_default_axis_random_select_last_index]
+status = "pass"
+
+[test_argmax_keepdims_example]
+status = "pass"
+
+[test_argmax_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmax_keepdims_random]
+status = "pass"
+
+[test_argmax_keepdims_random_select_last_index]
+status = "pass"
+
+[test_argmax_negative_axis_keepdims_example]
+status = "pass"
+
+[test_argmax_negative_axis_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmax_negative_axis_keepdims_random]
+status = "pass"
+
+[test_argmax_negative_axis_keepdims_random_select_last_index]
+status = "pass"
+
+[test_argmax_no_keepdims_example]
+status = "pass"
+
+[test_argmax_no_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmax_no_keepdims_random]
+status = "pass"
+
+[test_argmax_no_keepdims_random_select_last_index]
+status = "pass"
+
+[test_argmin_default_axis_example]
+status = "pass"
+
+[test_argmin_default_axis_example_select_last_index]
+status = "pass"
+
+[test_argmin_default_axis_random]
+status = "pass"
+
+[test_argmin_default_axis_random_select_last_index]
+status = "pass"
+
+[test_argmin_keepdims_example]
+status = "pass"
+
+[test_argmin_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmin_keepdims_random]
+status = "pass"
+
+[test_argmin_keepdims_random_select_last_index]
+status = "pass"
+
+[test_argmin_negative_axis_keepdims_example]
+status = "pass"
+
+[test_argmin_negative_axis_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmin_negative_axis_keepdims_random]
+status = "pass"
+
+[test_argmin_negative_axis_keepdims_random_select_last_index]
+status = "pass"
+
+[test_argmin_no_keepdims_example]
+status = "pass"
+
+[test_argmin_no_keepdims_example_select_last_index]
+status = "pass"
+
+[test_argmin_no_keepdims_random]
+status = "pass"
+
+[test_argmin_no_keepdims_random_select_last_index]
+status = "pass"
+
+[test_asin]
+status = "pass"
+
+[test_asin_example]
+status = "pass"
+
+[test_asinh]
+status = "pass"
+
+[test_asinh_example]
+status = "pass"
+
+[test_atan]
+status = "pass"
+
+[test_atan_example]
+status = "pass"
+
+[test_atanh]
+status = "pass"
+
+[test_atanh_example]
+status = "pass"
+
+[test_attention_3d]
+status = "pass"
+
+[test_attention_3d_attn_mask]
+status = "pass"
+
+[test_attention_3d_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_3d_causal_expanded]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_attn_mask]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_diff_heads_sizes_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_3d_diff_heads_sizes_causal_expanded]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_expanded]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_scaled]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_scaled_expanded]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_softcap]
+status = "pass"
+
+[test_attention_3d_diff_heads_sizes_softcap_expanded]
+status = "pass"
+
+[test_attention_3d_diff_heads_with_past_and_present]
+status = "pass"
+
+[test_attention_3d_diff_heads_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_expanded]
+status = "pass"
+
+[test_attention_3d_gqa]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_attn_mask]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_gqa_causal]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_causal_expanded]
+status = "pass"
+
+[test_attention_3d_gqa_expanded]
+status = "pass"
+
+[test_attention_3d_gqa_scaled]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_scaled_expanded]
+status = "pass"
+
+[test_attention_3d_gqa_softcap]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_softcap_expanded]
+status = "pass"
+
+[test_attention_3d_gqa_with_past_and_present]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_3d_gqa_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_scaled]
+status = "pass"
+
+[test_attention_3d_scaled_expanded]
+status = "pass"
+
+[test_attention_3d_softcap]
+status = "pass"
+
+[test_attention_3d_softcap_expanded]
+status = "pass"
+
+[test_attention_3d_transpose_verification]
+status = "pass"
+
+[test_attention_3d_transpose_verification_expanded]
+status = "pass"
+
+[test_attention_3d_with_past_and_present]
+status = "pass"
+
+[test_attention_3d_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_with_past_and_present_qk_matmul]
+status = "pass"
+
+[test_attention_3d_with_past_and_present_qk_matmul_bias]
+status = "pass"
+
+[test_attention_3d_with_past_and_present_qk_matmul_bias_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_with_past_and_present_qk_matmul_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_with_past_and_present_qk_matmul_softcap]
+status = "pass"
+
+[test_attention_3d_with_past_and_present_qk_matmul_softcap_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_3d_with_past_and_present_qk_matmul_softmax]
+status = "pass"
+
+[test_attention_3d_with_past_and_present_qk_matmul_softmax_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d]
+status = "pass"
+
+[test_attention_4d_attn_mask]
+status = "pass"
+
+[test_attention_4d_attn_mask_3d]
+status = "pass"
+
+[test_attention_4d_attn_mask_3d_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_attn_mask_3d_causal_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_3d_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_4d]
+status = "pass"
+
+[test_attention_4d_attn_mask_4d_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_attn_mask_4d_causal_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_4d_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_bool]
+status = "pass"
+
+[test_attention_4d_attn_mask_bool_4d]
+status = "pass"
+
+[test_attention_4d_attn_mask_bool_4d_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_bool_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_causal_expanded]
+status = "pass"
+
+[test_attention_4d_diff_heads_mask4d_padded_kv]
+status = "skip-codegen"
+reason = "Attention: past_[key,value] and present_[key,value] must be used together."
+
+[test_attention_4d_diff_heads_mask4d_padded_kv_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_diff_heads_sizes]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_attn_mask]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_diff_heads_sizes_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_diff_heads_sizes_causal_expanded]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_expanded]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_scaled]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_scaled_expanded]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_softcap]
+status = "pass"
+
+[test_attention_4d_diff_heads_sizes_softcap_expanded]
+status = "pass"
+
+[test_attention_4d_diff_heads_with_past_and_present]
+status = "pass"
+
+[test_attention_4d_diff_heads_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_diff_heads_with_past_and_present_mask3d]
+status = "pass"
+
+[test_attention_4d_diff_heads_with_past_and_present_mask3d_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_diff_heads_with_past_and_present_mask4d]
+status = "pass"
+
+[test_attention_4d_diff_heads_with_past_and_present_mask4d_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_expanded]
+status = "pass"
+
+[test_attention_4d_fp16]
+status = "pass"
+
+[test_attention_4d_fp16_expanded]
+status = "pass"
+
+[test_attention_4d_gqa]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_attn_mask]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_attn_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_gqa_causal]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_causal_expanded]
+status = "pass"
+
+[test_attention_4d_gqa_expanded]
+status = "pass"
+
+[test_attention_4d_gqa_scaled]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_scaled_expanded]
+status = "pass"
+
+[test_attention_4d_gqa_softcap]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_softcap_expanded]
+status = "pass"
+
+[test_attention_4d_gqa_with_past_and_present]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_attention_4d_gqa_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_gqa_with_past_and_present_fp16]
+status = "fail-compare"
+reason = "burn-flex attention_naive panics on GQA: key heads (3) != query heads (9) at burn-flex/src/ops/attention.rs:658. Surfaced after #393 wired f16 comparison through the harness; not a burn-onnx codegen bug."
+tracking = "https://github.com/tracel-ai/burn/issues/4930"
+
+[test_attention_4d_gqa_with_past_and_present_fp16_expanded]
+status = "skip-codegen"
+reason = "Pad: constant_value must be a scalar tensor (rank 0), got rank 1"
+
+[test_attention_4d_scaled]
+status = "pass"
+
+[test_attention_4d_scaled_expanded]
+status = "pass"
+
+[test_attention_4d_softcap]
+status = "pass"
+
+[test_attention_4d_softcap_expanded]
+status = "pass"
+
+[test_attention_4d_with_past_and_present]
+status = "pass"
+
+[test_attention_4d_with_past_and_present_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul]
+status = "pass"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias]
+status = "pass"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask]
+status = "pass"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_causal_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_3d_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask]
+status = "pass"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask_causal]
+status = "fail-compare"
+reason = "attention op family comparison failure"
+tracking = "#311"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask_causal_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_4d_mask_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul_bias_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_past_and_present_qk_matmul_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_qk_matmul]
+status = "skip-codegen"
+reason = "Node 'attention1' (Attention): Attention: past_key, past_value, present_key, present_value can only be used together"
+
+[test_attention_4d_with_qk_matmul_bias]
+status = "skip-codegen"
+reason = "Node 'attention1' (Attention): Attention: past_key, past_value, present_key, present_value can only be used together"
+
+[test_attention_4d_with_qk_matmul_bias_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_qk_matmul_expanded]
+status = "pass"
+
+[test_attention_4d_with_qk_matmul_softcap]
+status = "skip-codegen"
+reason = "Node 'attention1' (Attention): Attention: past_key, past_value, present_key, present_value can only be used together"
+
+[test_attention_4d_with_qk_matmul_softcap_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_attention_4d_with_qk_matmul_softmax]
+status = "skip-codegen"
+reason = "Node 'attention1' (Attention): Attention: past_key, past_value, present_key, present_value can only be used together"
+
+[test_attention_4d_with_qk_matmul_softmax_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1, Bool>`, found `Tensor<1, Int>`"
+
+[test_averagepool_1d_default]
+status = "pass"
+
+[test_averagepool_2d_ceil]
+status = "pass"
+
+[test_averagepool_2d_ceil_last_window_starts_on_pad]
+status = "fail-compare"
+reason = "averagepool op family comparison failure"
+tracking = "#311"
+
+[test_averagepool_2d_default]
+status = "pass"
+
+[test_averagepool_2d_dilations]
+status = "fail-compare"
+reason = "averagepool op family comparison failure"
+tracking = "#311"
+
+[test_averagepool_2d_pads]
+status = "pass"
+
+[test_averagepool_2d_pads_count_include_pad]
+status = "pass"
+
+[test_averagepool_2d_precomputed_pads]
+status = "pass"
+
+[test_averagepool_2d_precomputed_pads_count_include_pad]
+status = "pass"
+
+[test_averagepool_2d_precomputed_same_upper]
+status = "pass"
+
+[test_averagepool_2d_precomputed_strides]
+status = "pass"
+
+[test_averagepool_2d_same_lower]
+status = "fail-compare"
+reason = "averagepool op family comparison failure"
+tracking = "#311"
+
+[test_averagepool_2d_same_upper]
+status = "fail-compare"
+reason = "averagepool op family comparison failure"
+tracking = "#311"
+
+[test_averagepool_2d_strides]
+status = "pass"
+
+[test_averagepool_3d_default]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_averagepool_3d_dilations_large_count_include_pad_is_0_ceil_mode_is_False]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_averagepool_3d_dilations_large_count_include_pad_is_0_ceil_mode_is_True]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_False]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_averagepool_3d_dilations_small]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D average pooling: Burn lacks a native AvgPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_basic_conv_with_padding]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_basic_conv_without_padding]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_basic_deform_conv_with_padding]
+status = "pass"
+
+[test_basic_deform_conv_without_padding]
+status = "pass"
+
+[test_batchnorm_epsilon]
+status = "pass"
+
+[test_batchnorm_epsilon_training_mode]
+status = "skip-codegen"
+reason = "Node 'batchnormalization1' (BatchNormalization): BatchNorm: training_mode=1 is not supported (only inference mode)"
+
+[test_batchnorm_example]
+status = "pass"
+
+[test_batchnorm_example_training_mode]
+status = "skip-codegen"
+reason = "Node 'batchnormalization1' (BatchNormalization): BatchNorm: training_mode=1 is not supported (only inference mode)"
+
+[test_bernoulli]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_bernoulli_double]
+status = "fail-compare"
+reason = "bernoulli op family comparison failure"
+tracking = "#311"
+
+[test_bernoulli_double_expanded]
+status = "fail-compare"
+reason = "bernoulli op family comparison failure"
+tracking = "#311"
+
+[test_bernoulli_expanded]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_bernoulli_seed]
+status = "fail-compare"
+reason = "bernoulli op family comparison failure"
+tracking = "#311"
+
+[test_bernoulli_seed_expanded]
+status = "fail-compare"
+reason = "bernoulli op family comparison failure"
+tracking = "#311"
+
+[test_bitshift_left_uint16]
+status = "pass"
+
+[test_bitshift_left_uint32]
+status = "pass"
+
+[test_bitshift_left_uint64]
+status = "pass"
+
+[test_bitshift_left_uint8]
+status = "pass"
+
+[test_bitshift_right_uint16]
+status = "pass"
+
+[test_bitshift_right_uint32]
+status = "pass"
+
+[test_bitshift_right_uint64]
+status = "pass"
+
+[test_bitshift_right_uint8]
+status = "pass"
+
+[test_bitwise_and_i16_3d]
+status = "pass"
+
+[test_bitwise_and_i32_2d]
+status = "pass"
+
+[test_bitwise_and_ui64_bcast_3v1d]
+status = "pass"
+
+[test_bitwise_and_ui8_bcast_4v3d]
+status = "pass"
+
+[test_bitwise_not_2d]
+status = "pass"
+
+[test_bitwise_not_3d]
+status = "pass"
+
+[test_bitwise_not_4d]
+status = "pass"
+
+[test_bitwise_or_i16_4d]
+status = "pass"
+
+[test_bitwise_or_i32_2d]
+status = "pass"
+
+[test_bitwise_or_ui64_bcast_3v1d]
+status = "pass"
+
+[test_bitwise_or_ui8_bcast_4v3d]
+status = "pass"
+
+[test_bitwise_xor_i16_3d]
+status = "pass"
+
+[test_bitwise_xor_i32_2d]
+status = "pass"
+
+[test_bitwise_xor_ui64_bcast_3v1d]
+status = "pass"
+
+[test_bitwise_xor_ui8_bcast_4v3d]
+status = "pass"
+
+[test_blackmanwindow]
+status = "pass"
+
+[test_blackmanwindow_expanded]
+status = "skip-compile"
+reason = "no method named `add` found for type `f32` in the current scope: method not found in `f32`"
+
+[test_blackmanwindow_symmetric]
+status = "pass"
+
+[test_blackmanwindow_symmetric_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1>`, found `f32`"
+
+[test_cast_BFLOAT16_to_FLOAT]
+status = "pass"
+
+[test_cast_DOUBLE_to_FLOAT]
+status = "pass"
+
+[test_cast_DOUBLE_to_FLOAT16]
+status = "pass"
+
+[test_cast_FLOAT16_to_DOUBLE]
+status = "pass"
+
+[test_cast_FLOAT16_to_FLOAT]
+status = "pass"
+
+[test_cast_FLOAT16_to_FLOAT4E2M1]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 23"
+
+[test_cast_FLOAT16_to_FLOAT8E4M3FN]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT16_to_FLOAT8E4M3FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT16_to_FLOAT8E5M2]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT16_to_FLOAT8E5M2FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT16_to_INT4]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 22"
+
+[test_cast_FLOAT16_to_UINT4]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 21"
+
+[test_cast_FLOAT4E2M1_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_FLOAT4E2M1_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_FLOAT8E4M3FNUZ_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_FLOAT8E4M3FNUZ_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_FLOAT8E4M3FN_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_FLOAT8E4M3FN_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_FLOAT8E5M2FNUZ_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_FLOAT8E5M2FNUZ_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_FLOAT8E5M2_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_FLOAT8E5M2_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_FLOAT_to_BFLOAT16]
+status = "pass"
+
+[test_cast_FLOAT_to_DOUBLE]
+status = "pass"
+
+[test_cast_FLOAT_to_FLOAT16]
+status = "pass"
+
+[test_cast_FLOAT_to_FLOAT4E2M1]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 23"
+
+[test_cast_FLOAT_to_FLOAT8E4M3FN]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT_to_FLOAT8E4M3FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT_to_FLOAT8E5M2]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT_to_FLOAT8E5M2FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_FLOAT_to_INT4]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 22"
+
+[test_cast_FLOAT_to_UINT4]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 21"
+
+[test_cast_INT4_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_INT4_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_INT4_to_INT8]
+status = "pass"
+
+[test_cast_UINT4_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_UINT4_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_UINT4_to_UINT8]
+status = "pass"
+
+[test_cast_e8m0_FLOAT16_to_FLOAT8E8M0]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=24) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_e8m0_FLOAT8E8M0_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_cast_e8m0_FLOAT8E8M0_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_cast_e8m0_FLOAT_to_FLOAT8E8M0]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=24) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT16_to_FLOAT8E4M3FN]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT16_to_FLOAT8E4M3FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT16_to_FLOAT8E5M2]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT16_to_FLOAT8E5M2FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT_to_FLOAT8E4M3FN]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT_to_FLOAT8E4M3FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT_to_FLOAT8E5M2]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_cast_no_saturate_FLOAT_to_FLOAT8E5M2FNUZ]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_BFLOAT16_to_FLOAT]
+status = "pass"
+
+[test_castlike_BFLOAT16_to_FLOAT_expanded]
+status = "pass"
+
+[test_castlike_DOUBLE_to_FLOAT]
+status = "pass"
+
+[test_castlike_DOUBLE_to_FLOAT16]
+status = "pass"
+
+[test_castlike_DOUBLE_to_FLOAT16_expanded]
+status = "pass"
+
+[test_castlike_DOUBLE_to_FLOAT_expanded]
+status = "pass"
+
+[test_castlike_FLOAT16_to_DOUBLE]
+status = "pass"
+
+[test_castlike_FLOAT16_to_DOUBLE_expanded]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT4E2M1]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT4E2M1_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 23"
+
+[test_castlike_FLOAT16_to_FLOAT8E4M3FN]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT8E4M3FNUZ]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT8E4M3FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT16_to_FLOAT8E4M3FN_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT16_to_FLOAT8E5M2]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT8E5M2FNUZ]
+status = "pass"
+
+[test_castlike_FLOAT16_to_FLOAT8E5M2FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT16_to_FLOAT8E5M2_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT16_to_FLOAT_expanded]
+status = "pass"
+
+[test_castlike_FLOAT16_to_INT4]
+status = "pass"
+
+[test_castlike_FLOAT16_to_INT4_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 22"
+
+[test_castlike_FLOAT16_to_UINT4]
+status = "pass"
+
+[test_castlike_FLOAT16_to_UINT4_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 21"
+
+[test_castlike_FLOAT4E2M1_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT4E2M1_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT4E2M1_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT4E2M1_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E4M3FNUZ_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E4M3FNUZ_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E4M3FNUZ_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E4M3FNUZ_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E4M3FN_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E4M3FN_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E4M3FN_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E4M3FN_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E5M2FNUZ_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E5M2FNUZ_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E5M2FNUZ_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E5M2FNUZ_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E5M2_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT8E5M2_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E5M2_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_FLOAT8E5M2_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_FLOAT_to_BFLOAT16]
+status = "pass"
+
+[test_castlike_FLOAT_to_BFLOAT16_expanded]
+status = "pass"
+
+[test_castlike_FLOAT_to_DOUBLE]
+status = "pass"
+
+[test_castlike_FLOAT_to_DOUBLE_expanded]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT16]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT16_expanded]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT4E2M1]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT4E2M1_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 23"
+
+[test_castlike_FLOAT_to_FLOAT8E4M3FN]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT8E4M3FNUZ]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT8E4M3FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT_to_FLOAT8E4M3FN_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT_to_FLOAT8E5M2]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT8E5M2FNUZ]
+status = "pass"
+
+[test_castlike_FLOAT_to_FLOAT8E5M2FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT_to_FLOAT8E5M2_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_FLOAT_to_INT4]
+status = "pass"
+
+[test_castlike_FLOAT_to_INT4_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 22"
+
+[test_castlike_FLOAT_to_UINT4]
+status = "pass"
+
+[test_castlike_FLOAT_to_UINT4_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': unsupported dtype: 21"
+
+[test_castlike_INT4_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_INT4_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_INT4_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_INT4_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_INT4_to_INT8]
+status = "pass"
+
+[test_castlike_INT4_to_INT8_expanded]
+status = "pass"
+
+[test_castlike_UINT4_to_FLOAT]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_UINT4_to_FLOAT16]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_UINT4_to_FLOAT16_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f16`, found `f32`"
+
+[test_castlike_UINT4_to_FLOAT_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `f32`, found `Tensor<0>`"
+
+[test_castlike_UINT4_to_UINT8]
+status = "pass"
+
+[test_castlike_UINT4_to_UINT8_expanded]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E4M3FN]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E4M3FNUZ]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E4M3FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E4M3FN_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E5M2]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E5M2FNUZ]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E5M2FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT16_to_FLOAT8E5M2_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E4M3FN]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E4M3FNUZ]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E4M3FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=18) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E4M3FN_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=17) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E5M2]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E5M2FNUZ]
+status = "pass"
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E5M2FNUZ_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=20) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_castlike_no_saturate_FLOAT_to_FLOAT8E5M2_expanded]
+status = "skip-codegen"
+reason = "Node 'cast1' (Cast): Invalid attribute 'to': Float8 dtype (type_id=19) is not supported. The saturate and round_mode attributes are float8-specific and are therefore also unsupported."
+
+[test_ceil]
+status = "pass"
+
+[test_ceil_example]
+status = "pass"
+
+[test_celu]
+status = "pass"
+
+[test_celu_expanded]
+status = "pass"
+
+[test_center_crop_pad_crop]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_crop_and_pad]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_crop_and_pad_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_center_crop_pad_crop_axes_chw]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_crop_axes_chw_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_center_crop_pad_crop_axes_hwc]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_crop_axes_hwc_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_center_crop_pad_crop_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_center_crop_pad_crop_negative_axes_hwc]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_crop_negative_axes_hwc_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_center_crop_pad_pad]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): CenterCropPad (node 'centercroppad1')"
+
+[test_center_crop_pad_pad_expanded]
+status = "skip-codegen"
+reason = "max: unsupported input types"
+
+[test_clip]
+status = "pass"
+
+[test_clip_default_inbounds]
+status = "pass"
+
+[test_clip_default_inbounds_expanded]
+status = "pass"
+
+[test_clip_default_int8_inbounds]
+status = "pass"
+
+[test_clip_default_int8_inbounds_expanded]
+status = "pass"
+
+[test_clip_default_int8_max]
+status = "pass"
+
+[test_clip_default_int8_max_expanded]
+status = "pass"
+
+[test_clip_default_int8_min]
+status = "pass"
+
+[test_clip_default_int8_min_expanded]
+status = "pass"
+
+[test_clip_default_max]
+status = "pass"
+
+[test_clip_default_max_expanded]
+status = "pass"
+
+[test_clip_default_min]
+status = "pass"
+
+[test_clip_default_min_expanded]
+status = "pass"
+
+[test_clip_example]
+status = "pass"
+
+[test_clip_example_expanded]
+status = "pass"
+
+[test_clip_expanded]
+status = "pass"
+
+[test_clip_inbounds]
+status = "pass"
+
+[test_clip_inbounds_expanded]
+status = "pass"
+
+[test_clip_min_greater_than_max]
+status = "pass"
+
+[test_clip_min_greater_than_max_expanded]
+status = "pass"
+
+[test_clip_outbounds]
+status = "pass"
+
+[test_clip_outbounds_expanded]
+status = "pass"
+
+[test_clip_splitbounds]
+status = "pass"
+
+[test_clip_splitbounds_expanded]
+status = "pass"
+
+[test_col2im]
+status = "skip-codegen"
+reason = "Node 'col2im1' (Col2Im): Col2Im: image_shape (input[1]) must be a constant"
+
+[test_col2im_5d]
+status = "skip-codegen"
+reason = "Node 'col2im1' (Col2Im): Col2Im: image_shape (input[1]) must be a constant"
+
+[test_col2im_dilations]
+status = "skip-codegen"
+reason = "Node 'col2im1' (Col2Im): Col2Im: image_shape (input[1]) must be a constant"
+
+[test_col2im_pads]
+status = "skip-codegen"
+reason = "Node 'col2im1' (Col2Im): Col2Im: image_shape (input[1]) must be a constant"
+
+[test_col2im_strides]
+status = "skip-codegen"
+reason = "Node 'col2im1' (Col2Im): Col2Im: image_shape (input[1]) must be a constant"
+
+[test_compress_0]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): Compress (node 'compress1')"
+
+[test_compress_1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): Compress (node 'compress1')"
+
+[test_compress_default_axis]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): Compress (node 'compress1')"
+
+[test_compress_negative_axis]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): Compress (node 'compress1')"
+
+[test_concat_1d_axis_0]
+status = "pass"
+
+[test_concat_1d_axis_negative_1]
+status = "pass"
+
+[test_concat_2d_axis_0]
+status = "pass"
+
+[test_concat_2d_axis_1]
+status = "pass"
+
+[test_concat_2d_axis_negative_1]
+status = "pass"
+
+[test_concat_2d_axis_negative_2]
+status = "pass"
+
+[test_concat_3d_axis_0]
+status = "pass"
+
+[test_concat_3d_axis_1]
+status = "pass"
+
+[test_concat_3d_axis_2]
+status = "pass"
+
+[test_concat_3d_axis_negative_1]
+status = "pass"
+
+[test_concat_3d_axis_negative_2]
+status = "pass"
+
+[test_concat_3d_axis_negative_3]
+status = "pass"
+
+[test_constant]
+status = "pass"
+
+[test_constant_pad]
+status = "pass"
+
+[test_constant_pad_axes]
+status = "pass"
+
+[test_constant_pad_negative_axes]
+status = "pass"
+
+[test_constantofshape_float_ones]
+status = "skip-compile"
+reason = "mismatched types: expected `[i64; 3]`, found `Tensor<1, Int>`"
+
+[test_constantofshape_int_shape_zero]
+status = "skip-compile"
+reason = "mismatched types: expected `[i64; 1]`, found `Tensor<1, Int>`"
+
+[test_constantofshape_int_zeros]
+status = "skip-compile"
+reason = "mismatched types: expected `[i64; 2]`, found `Tensor<1, Int>`"
+
+[test_conv_with_autopad_same]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_conv_with_strides_and_asymmetric_padding]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_conv_with_strides_no_padding]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_conv_with_strides_padding]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Conv2d: weight tensor must be present\")"
+
+[test_convinteger_with_padding]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ConvInteger (node 'convinteger1')"
+
+[test_convinteger_without_padding]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ConvInteger (node 'convinteger1')"
+
+[test_convtranspose]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_convtranspose_1d]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose1d: weight tensor must be present\")"
+
+[test_convtranspose_3d]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose3d: weight tensor must be present\")"
+
+[test_convtranspose_autopad_same]
+status = "skip-codegen"
+reason = "Node 'convtranspose2d1' (ConvTranspose2d): Invalid attribute 'auto_pad': Unsupported 'auto_pad' value: SAME_UPPER"
+
+[test_convtranspose_dilations]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_convtranspose_group_2]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_convtranspose_group_2_image_3]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_convtranspose_kernel_shape]
+status = "skip-codegen"
+reason = "Node 'convtranspose2d1' (ConvTranspose2d): Invalid attribute 'output_shape': Unexpected attribute for ConvTranspose2d: output_shape"
+
+[test_convtranspose_output_shape]
+status = "skip-codegen"
+reason = "Node 'convtranspose2d1' (ConvTranspose2d): Invalid attribute 'output_shape': Unexpected attribute for ConvTranspose2d: output_shape"
+
+[test_convtranspose_pad]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_convtranspose_pads]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"ConvTranspose2d: weight tensor must be present\")"
+
+[test_cos]
+status = "pass"
+
+[test_cos_example]
+status = "pass"
+
+[test_cosh]
+status = "pass"
+
+[test_cosh_example]
+status = "pass"
+
+[test_cumsum_1d]
+status = "pass"
+
+[test_cumsum_1d_exclusive]
+status = "pass"
+
+[test_cumsum_1d_int32_exclusive]
+status = "pass"
+
+[test_cumsum_1d_reverse]
+status = "pass"
+
+[test_cumsum_1d_reverse_exclusive]
+status = "pass"
+
+[test_cumsum_2d_axis_0]
+status = "pass"
+
+[test_cumsum_2d_axis_1]
+status = "pass"
+
+[test_cumsum_2d_int32]
+status = "pass"
+
+[test_cumsum_2d_negative_axis]
+status = "pass"
+
+[test_deform_conv_with_mask_bias]
+status = "pass"
+
+[test_deform_conv_with_multiple_offset_groups]
+status = "pass"
+
+[test_depthtospace_crd_mode_example]
+status = "pass"
+
+[test_depthtospace_example]
+status = "pass"
+
+[test_dequantizelinear]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_axis]
+status = "pass"
+
+[test_dequantizelinear_blocked]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): DequantizeLinear: blocked quantization (block_size=2) is not supported yet"
+
+[test_dequantizelinear_e4m3fn]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_e4m3fn_float16]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F16)"
+
+[test_dequantizelinear_e4m3fn_zero_point]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_e5m2]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_float4e2m1]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_int16]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_int4]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_uint16]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_dequantizelinear_uint4]
+status = "skip-codegen"
+reason = "Node 'dequantizelinear1' (DequantizeLinear): Type mismatch: expected on-device tensor for x_scale, got ScalarNative(F32)"
+
+[test_det_2d]
+status = "fail-compare"
+reason = "det op family comparison failure"
+tracking = "#311"
+
+[test_det_nd]
+status = "pass"
+
+[test_dft]
+status = "fail-compare"
+reason = "Burn rfft requires power-of-2 signal dimension; test uses dim=10"
+tracking = "#161"
+
+[test_dft_axis]
+status = "fail-compare"
+reason = "Burn rfft requires power-of-2 signal dimension; test uses dim=10"
+tracking = "#161"
+
+[test_dft_axis_opset19]
+status = "fail-compare"
+reason = "Burn rfft requires power-of-2 signal dimension; test uses dim=10"
+tracking = "#161"
+
+[test_dft_inverse]
+status = "skip-codegen"
+reason = "Node 'dft1' (Dft): DFT: inverse DFT (inverse=1) is not supported. Burn's irfft is the inverse of rfft (onesided real FFT), which differs from ONNX's complex-to-complex inverse DFT. A full ifft implementation in Burn i..."
+
+[test_dft_inverse_opset19]
+status = "skip-codegen"
+reason = "Node 'dft1' (Dft): DFT: inverse DFT (inverse=1) is not supported. Burn's irfft is the inverse of rfft (onesided real FFT), which differs from ONNX's complex-to-complex inverse DFT. A full ifft implementation in Burn i..."
+
+[test_dft_opset19]
+status = "fail-compare"
+reason = "Burn rfft requires power-of-2 signal dimension; test uses dim=10"
+tracking = "#161"
+
+[test_div]
+status = "pass"
+
+[test_div_bcast]
+status = "pass"
+
+[test_div_example]
+status = "pass"
+
+[test_div_int16]
+status = "pass"
+
+[test_div_int8]
+status = "pass"
+
+[test_div_uint16]
+status = "pass"
+
+[test_div_uint32]
+status = "pass"
+
+[test_div_uint64]
+status = "pass"
+
+[test_div_uint8]
+status = "pass"
+
+[test_dropout_default]
+status = "pass"
+
+[test_dropout_default_mask]
+status = "pass"
+
+[test_dropout_default_mask_ratio]
+status = "pass"
+
+[test_dropout_default_old]
+status = "pass"
+
+[test_dropout_default_ratio]
+status = "pass"
+
+[test_dropout_random_old]
+status = "pass"
+
+[test_dynamicquantizelinear]
+status = "pass"
+
+[test_dynamicquantizelinear_expanded]
+status = "pass"
+
+[test_dynamicquantizelinear_max_adjusted]
+status = "pass"
+
+[test_dynamicquantizelinear_max_adjusted_expanded]
+status = "pass"
+
+[test_dynamicquantizelinear_min_adjusted]
+status = "pass"
+
+[test_dynamicquantizelinear_min_adjusted_expanded]
+status = "pass"
+
+[test_edge_pad]
+status = "pass"
+
+[test_einsum_batch_diagonal]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_einsum_batch_matmul]
+status = "pass"
+
+[test_einsum_inner_prod]
+status = "pass"
+
+[test_einsum_scalar]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_einsum_sum]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_einsum_transpose]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_elu]
+status = "pass"
+
+[test_elu_default]
+status = "pass"
+
+[test_elu_default_expanded_ver18]
+status = "pass"
+
+[test_elu_example]
+status = "pass"
+
+[test_elu_example_expanded_ver18]
+status = "pass"
+
+[test_elu_expanded_ver18]
+status = "pass"
+
+[test_equal]
+status = "pass"
+
+[test_equal_bcast]
+status = "pass"
+
+[test_equal_int16]
+status = "pass"
+
+[test_equal_int8]
+status = "pass"
+
+[test_equal_string]
+status = "skip-compile"
+reason = "mismatched types: expected `bool`, found `Tensor<0, Bool>`"
+
+[test_equal_string_broadcast]
+status = "skip-compile"
+reason = "mismatched types: expected `bool`, found `Tensor<0, Bool>`"
+
+[test_equal_uint16]
+status = "pass"
+
+[test_equal_uint32]
+status = "pass"
+
+[test_equal_uint64]
+status = "pass"
+
+[test_equal_uint8]
+status = "pass"
+
+[test_erf]
+status = "pass"
+
+[test_exp]
+status = "pass"
+
+[test_exp_example]
+status = "pass"
+
+[test_expand_dim_changed]
+status = "pass"
+
+[test_expand_dim_unchanged]
+status = "pass"
+
+[test_eyelike_populate_off_main_diagonal]
+status = "pass"
+
+[test_eyelike_with_dtype]
+status = "pass"
+
+[test_eyelike_without_dtype]
+status = "pass"
+
+[test_flatten_axis0]
+status = "pass"
+
+[test_flatten_axis1]
+status = "pass"
+
+[test_flatten_axis2]
+status = "pass"
+
+[test_flatten_axis3]
+status = "pass"
+
+[test_flatten_default_axis]
+status = "pass"
+
+[test_flatten_negative_axis1]
+status = "pass"
+
+[test_flatten_negative_axis2]
+status = "pass"
+
+[test_flatten_negative_axis3]
+status = "pass"
+
+[test_flatten_negative_axis4]
+status = "pass"
+
+[test_floor]
+status = "pass"
+
+[test_floor_example]
+status = "pass"
+
+[test_gather_0]
+status = "pass"
+
+[test_gather_1]
+status = "pass"
+
+[test_gather_2d_indices]
+status = "pass"
+
+[test_gather_elements_0]
+status = "pass"
+
+[test_gather_elements_1]
+status = "pass"
+
+[test_gather_elements_negative_indices]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gather_negative_indices]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gathernd_example_float32]
+status = "pass"
+
+[test_gathernd_example_int32]
+status = "pass"
+
+[test_gathernd_example_int32_batch_dim1]
+status = "pass"
+
+[test_gelu_default_1]
+status = "pass"
+
+[test_gelu_default_1_expanded]
+status = "pass"
+
+[test_gelu_default_2]
+status = "pass"
+
+[test_gelu_default_2_expanded]
+status = "skip-compile"
+reason = "the trait bound `burn::Tensor<3>: ElementConversion` is not satisfied: the trait `ElementConversion` is not implemented for `burn::Tensor<3>`"
+
+[test_gelu_tanh_1]
+status = "pass"
+
+[test_gelu_tanh_1_expanded]
+status = "pass"
+
+[test_gelu_tanh_2]
+status = "fail-compare"
+reason = "gelu op family comparison failure"
+tracking = "#311"
+
+[test_gelu_tanh_2_expanded]
+status = "skip-compile"
+reason = "the trait bound `burn::Tensor<3>: ElementConversion` is not satisfied: the trait `ElementConversion` is not implemented for `burn::Tensor<3>`"
+
+[test_gemm_all_attributes]
+status = "pass"
+
+[test_gemm_alpha]
+status = "pass"
+
+[test_gemm_beta]
+status = "pass"
+
+[test_gemm_default_matrix_bias]
+status = "pass"
+
+[test_gemm_default_no_bias]
+status = "pass"
+
+[test_gemm_default_scalar_bias]
+status = "pass"
+
+[test_gemm_default_single_elem_vector_bias]
+status = "pass"
+
+[test_gemm_default_vector_bias]
+status = "pass"
+
+[test_gemm_default_zero_bias]
+status = "pass"
+
+[test_gemm_transposeA]
+status = "pass"
+
+[test_gemm_transposeB]
+status = "pass"
+
+[test_globalaveragepool]
+status = "pass"
+
+[test_globalaveragepool_precomputed]
+status = "pass"
+
+[test_globalmaxpool]
+status = "skip-codegen"
+reason = "Unsupported node type for inputs: GlobalMaxPool(GlobalMaxPoolNode { name: \"globalmaxpool1\", inputs: [Argument { name: \"x\", ty: Tensor(TensorType { dtype: F32, rank: 4, static_shape: Some([Some(1), Some(3), Some(5), So..."
+
+[test_globalmaxpool_precomputed]
+status = "skip-codegen"
+reason = "Unsupported node type for inputs: GlobalMaxPool(GlobalMaxPoolNode { name: \"globalmaxpool1\", inputs: [Argument { name: \"x\", ty: Tensor(TensorType { dtype: F32, rank: 4, static_shape: Some([Some(1), Some(1), Some(3), So..."
+
+[test_greater]
+status = "pass"
+
+[test_greater_bcast]
+status = "pass"
+
+[test_greater_equal]
+status = "pass"
+
+[test_greater_equal_bcast]
+status = "pass"
+
+[test_greater_equal_bcast_expanded]
+status = "pass"
+
+[test_greater_equal_expanded]
+status = "pass"
+
+[test_greater_equal_int16]
+status = "pass"
+
+[test_greater_equal_int16_expanded]
+status = "pass"
+
+[test_greater_equal_int8]
+status = "pass"
+
+[test_greater_equal_int8_expanded]
+status = "pass"
+
+[test_greater_equal_uint16]
+status = "pass"
+
+[test_greater_equal_uint16_expanded]
+status = "pass"
+
+[test_greater_equal_uint32]
+status = "pass"
+
+[test_greater_equal_uint32_expanded]
+status = "pass"
+
+[test_greater_equal_uint64]
+status = "pass"
+
+[test_greater_equal_uint64_expanded]
+status = "pass"
+
+[test_greater_equal_uint8]
+status = "pass"
+
+[test_greater_equal_uint8_expanded]
+status = "pass"
+
+[test_greater_int16]
+status = "pass"
+
+[test_greater_int8]
+status = "pass"
+
+[test_greater_uint16]
+status = "pass"
+
+[test_greater_uint32]
+status = "pass"
+
+[test_greater_uint64]
+status = "pass"
+
+[test_greater_uint8]
+status = "pass"
+
+[test_gridsample]
+status = "pass"
+
+[test_gridsample_aligncorners_true]
+status = "pass"
+
+[test_gridsample_bicubic]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_bicubic_align_corners_0_additional_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_bicubic_align_corners_1_additional_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_bilinear]
+status = "pass"
+
+[test_gridsample_bilinear_align_corners_0_additional_1]
+status = "pass"
+
+[test_gridsample_bilinear_align_corners_1_additional_1]
+status = "pass"
+
+[test_gridsample_border_padding]
+status = "pass"
+
+[test_gridsample_nearest]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_nearest_align_corners_0_additional_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_nearest_align_corners_1_additional_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_reflection_padding]
+status = "pass"
+
+[test_gridsample_volumetric_bilinear_align_corners_0]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_volumetric_bilinear_align_corners_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_volumetric_nearest_align_corners_0]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_volumetric_nearest_align_corners_1]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_gridsample_zeros_padding]
+status = "pass"
+
+[test_group_normalization_epsilon]
+status = "pass"
+
+[test_group_normalization_epsilon_expanded]
+status = "pass"
+
+[test_group_normalization_example]
+status = "pass"
+
+[test_group_normalization_example_expanded]
+status = "pass"
+
+[test_gru_batchwise]
+status = "pass"
+
+[test_gru_defaults]
+status = "pass"
+
+[test_gru_seq_length]
+status = "pass"
+
+[test_gru_with_initial_bias]
+status = "pass"
+
+[test_hammingwindow]
+status = "pass"
+
+[test_hammingwindow_expanded]
+status = "skip-compile"
+reason = "no method named `add` found for type `f32` in the current scope: method not found in `f32`"
+
+[test_hammingwindow_symmetric]
+status = "pass"
+
+[test_hammingwindow_symmetric_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1>`, found `f32`"
+
+[test_hannwindow]
+status = "pass"
+
+[test_hannwindow_expanded]
+status = "skip-compile"
+reason = "no method named `add` found for type `f32` in the current scope: method not found in `f32`"
+
+[test_hannwindow_symmetric]
+status = "pass"
+
+[test_hannwindow_symmetric_expanded]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1>`, found `f32`"
+
+[test_hardmax_axis_0]
+status = "pass"
+
+[test_hardmax_axis_1]
+status = "pass"
+
+[test_hardmax_axis_2]
+status = "pass"
+
+[test_hardmax_default_axis]
+status = "pass"
+
+[test_hardmax_example]
+status = "pass"
+
+[test_hardmax_negative_axis]
+status = "pass"
+
+[test_hardmax_one_hot]
+status = "pass"
+
+[test_hardsigmoid]
+status = "pass"
+
+[test_hardsigmoid_default]
+status = "pass"
+
+[test_hardsigmoid_default_expanded_ver18]
+status = "pass"
+
+[test_hardsigmoid_example]
+status = "pass"
+
+[test_hardsigmoid_example_expanded_ver18]
+status = "pass"
+
+[test_hardsigmoid_expanded_ver18]
+status = "pass"
+
+[test_hardswish]
+status = "pass"
+
+[test_hardswish_expanded]
+status = "pass"
+
+[test_identity]
+status = "pass"
+
+[test_identity_opt]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'identity1' output 'identity1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_identity_sequence]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'identity1' output 'identity1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_if]
+status = "pass"
+
+[test_if_opt]
+status = "skip-codegen"
+reason = "called `Result::unwrap()` on an `Err` value: VariantNotFound(\"TYPE_PROTO\")"
+
+[test_if_seq]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build then_branch: Type inference failed: Unsupported ONNX operation(s): SequenceConstruct (node 'sequenceconstruct1')\")"
+
+[test_image_decoder_decode_bmp_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_jpeg2k_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_jpeg_bgr]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_jpeg_grayscale]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_jpeg_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_png_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_pnm_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_tiff_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_image_decoder_decode_webp_rgb]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ImageDecoder (node 'imagedecoder1')"
+
+[test_instancenorm_epsilon]
+status = "pass"
+
+[test_instancenorm_example]
+status = "pass"
+
+[test_isinf]
+status = "pass"
+
+[test_isinf_float16]
+status = "pass"
+
+[test_isinf_negative]
+status = "pass"
+
+[test_isinf_positive]
+status = "pass"
+
+[test_isnan]
+status = "pass"
+
+[test_isnan_float16]
+status = "pass"
+
+[test_l1normalization_axis_0]
+status = "pass"
+
+[test_l1normalization_axis_1]
+status = "pass"
+
+[test_l1normalization_axis_last]
+status = "pass"
+
+[test_l2normalization_axis_0]
+status = "pass"
+
+[test_l2normalization_axis_1]
+status = "pass"
+
+[test_layer_normalization_2d_axis0]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_2d_axis0_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis0_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis1]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_2d_axis1_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis1_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis_negative_1]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_2d_axis_negative_1_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis_negative_1_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis_negative_2]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_2d_axis_negative_2_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_2d_axis_negative_2_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis0_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis0_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis0_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis1_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis1_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis1_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis2_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis2_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis2_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_1_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis_negative_1_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_1_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_2_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis_negative_2_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_2_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_3_epsilon]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_3d_axis_negative_3_epsilon_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_3d_axis_negative_3_epsilon_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis0]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis0_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis0_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis1]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis1_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis1_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis2]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis2_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis2_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis3]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis3_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis3_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_1]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis_negative_1_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_1_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_2]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis_negative_2_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_2_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_3]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis_negative_3_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_3_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_4]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_4d_axis_negative_4_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_4d_axis_negative_4_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_default_axis]
+status = "skip-codegen"
+reason = "Node 'layernormalization1' (LayerNormalization): LayerNorm: weight tensor must be present"
+
+[test_layer_normalization_default_axis_expanded]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_layer_normalization_default_axis_expanded_ver18]
+status = "skip-codegen"
+reason = "Runtime reshape with tensor shape expects tensor output"
+
+[test_leakyrelu]
+status = "pass"
+
+[test_leakyrelu_default]
+status = "pass"
+
+[test_leakyrelu_default_expanded]
+status = "pass"
+
+[test_leakyrelu_example]
+status = "pass"
+
+[test_leakyrelu_example_expanded]
+status = "pass"
+
+[test_leakyrelu_expanded]
+status = "pass"
+
+[test_less]
+status = "pass"
+
+[test_less_bcast]
+status = "pass"
+
+[test_less_equal]
+status = "pass"
+
+[test_less_equal_bcast]
+status = "pass"
+
+[test_less_equal_bcast_expanded]
+status = "pass"
+
+[test_less_equal_expanded]
+status = "pass"
+
+[test_less_equal_int16]
+status = "pass"
+
+[test_less_equal_int16_expanded]
+status = "pass"
+
+[test_less_equal_int8]
+status = "pass"
+
+[test_less_equal_int8_expanded]
+status = "pass"
+
+[test_less_equal_uint16]
+status = "pass"
+
+[test_less_equal_uint16_expanded]
+status = "pass"
+
+[test_less_equal_uint32]
+status = "pass"
+
+[test_less_equal_uint32_expanded]
+status = "pass"
+
+[test_less_equal_uint64]
+status = "pass"
+
+[test_less_equal_uint64_expanded]
+status = "pass"
+
+[test_less_equal_uint8]
+status = "pass"
+
+[test_less_equal_uint8_expanded]
+status = "pass"
+
+[test_less_int16]
+status = "pass"
+
+[test_less_int8]
+status = "pass"
+
+[test_less_uint16]
+status = "pass"
+
+[test_less_uint32]
+status = "pass"
+
+[test_less_uint64]
+status = "pass"
+
+[test_less_uint8]
+status = "pass"
+
+[test_log]
+status = "pass"
+
+[test_log_example]
+status = "pass"
+
+[test_logsoftmax_axis_0]
+status = "pass"
+
+[test_logsoftmax_axis_0_expanded]
+status = "pass"
+
+[test_logsoftmax_axis_0_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_axis_1]
+status = "pass"
+
+[test_logsoftmax_axis_1_expanded]
+status = "pass"
+
+[test_logsoftmax_axis_1_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_axis_2]
+status = "pass"
+
+[test_logsoftmax_axis_2_expanded]
+status = "pass"
+
+[test_logsoftmax_axis_2_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_default_axis]
+status = "pass"
+
+[test_logsoftmax_default_axis_expanded]
+status = "pass"
+
+[test_logsoftmax_default_axis_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_example_1]
+status = "pass"
+
+[test_logsoftmax_example_1_expanded]
+status = "pass"
+
+[test_logsoftmax_example_1_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_large_number]
+status = "pass"
+
+[test_logsoftmax_large_number_expanded]
+status = "pass"
+
+[test_logsoftmax_large_number_expanded_ver18]
+status = "pass"
+
+[test_logsoftmax_negative_axis]
+status = "pass"
+
+[test_logsoftmax_negative_axis_expanded]
+status = "pass"
+
+[test_logsoftmax_negative_axis_expanded_ver18]
+status = "pass"
+
+[test_loop11]
+status = "pass"
+
+[test_loop13_seq]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build Loop body: Type inference failed: Unsupported ONNX operation(s): SequenceInsert (node 'sequenceinsert1')\")"
+
+[test_loop16_seq_none]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build Loop body: Type inference failed: Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1'), SequenceInsert (node 'sequenceinsert1')\")"
+
+[test_lpnormalization_default]
+status = "pass"
+
+[test_lppool_1d_default]
+status = "pass"
+
+[test_lppool_2d_default]
+status = "pass"
+
+[test_lppool_2d_dilations]
+status = "skip-codegen"
+reason = "Node 'lppool2d1' (LpPool2d): LpPool2d: dilations != 1 is not supported in burn-onnx yet"
+
+[test_lppool_2d_pads]
+status = "pass"
+
+[test_lppool_2d_same_lower]
+status = "pass"
+
+[test_lppool_2d_same_upper]
+status = "pass"
+
+[test_lppool_2d_strides]
+status = "pass"
+
+[test_lppool_3d_default]
+status = "skip-codegen"
+reason = "Only lp_pool 1d and 2d are supported"
+
+[test_lrn]
+status = "pass"
+
+[test_lrn_default]
+status = "pass"
+
+[test_lstm_batchwise]
+status = "pass"
+
+[test_lstm_defaults]
+status = "pass"
+
+[test_lstm_with_initial_bias]
+status = "pass"
+
+[test_lstm_with_peepholes]
+status = "skip-codegen"
+reason = "Node 'lstm1' (Lstm): LSTM peephole connections (input P) are not yet supported"
+
+[test_matmul_2d]
+status = "pass"
+
+[test_matmul_3d]
+status = "pass"
+
+[test_matmul_4d]
+status = "pass"
+
+[test_matmulinteger]
+status = "pass"
+
+[test_max_example]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 3"
+
+[test_max_float16]
+status = "pass"
+
+[test_max_float32]
+status = "pass"
+
+[test_max_float64]
+status = "pass"
+
+[test_max_int16]
+status = "pass"
+
+[test_max_int32]
+status = "pass"
+
+[test_max_int64]
+status = "pass"
+
+[test_max_int8]
+status = "pass"
+
+[test_max_one_input]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_max_two_inputs]
+status = "pass"
+
+[test_max_uint16]
+status = "pass"
+
+[test_max_uint32]
+status = "pass"
+
+[test_max_uint64]
+status = "pass"
+
+[test_max_uint8]
+status = "pass"
+
+[test_maxpool_1d_default]
+status = "pass"
+
+[test_maxpool_2d_ceil]
+status = "pass"
+
+[test_maxpool_2d_ceil_output_size_reduce_by_one]
+status = "fail-compare"
+reason = "maxpool op family comparison failure"
+tracking = "#311"
+
+[test_maxpool_2d_default]
+status = "pass"
+
+[test_maxpool_2d_dilations]
+status = "pass"
+
+[test_maxpool_2d_pads]
+status = "pass"
+
+[test_maxpool_2d_precomputed_pads]
+status = "pass"
+
+[test_maxpool_2d_precomputed_same_upper]
+status = "pass"
+
+[test_maxpool_2d_precomputed_strides]
+status = "pass"
+
+[test_maxpool_2d_same_lower]
+status = "pass"
+
+[test_maxpool_2d_same_upper]
+status = "pass"
+
+[test_maxpool_2d_strides]
+status = "pass"
+
+[test_maxpool_2d_uint8]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<4>`, found `Tensor<4, Int>`"
+
+[test_maxpool_3d_default]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D max pooling: Burn lacks a native MaxPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_maxpool_3d_dilations]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D max pooling: Burn lacks a native MaxPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_maxpool_3d_dilations_use_ref_impl]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D max pooling: Burn lacks a native MaxPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_maxpool_3d_dilations_use_ref_impl_large]
+status = "skip-codegen"
+reason = "burn-onnx does not currently support 3D max pooling: Burn lacks a native MaxPool3d primitive. Tracking issue: https://github.com/tracel-ai/burn-onnx/issues/343"
+
+[test_maxpool_with_argmax_2d_precomputed_pads]
+status = "skip-compile"
+reason = "cannot find value `maxpool2d1_out2` in this scope"
+
+[test_maxpool_with_argmax_2d_precomputed_strides]
+status = "skip-compile"
+reason = "cannot find value `maxpool2d1_out2` in this scope"
+
+[test_maxunpool_export_with_output_shape]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): MaxUnpool (node 'maxunpool1')"
+
+[test_maxunpool_export_without_output_shape]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): MaxUnpool (node 'maxunpool1')"
+
+[test_mean_example]
+status = "pass"
+
+[test_mean_one_input]
+status = "pass"
+
+[test_mean_two_inputs]
+status = "pass"
+
+[test_melweightmatrix]
+status = "pass"
+
+[test_min_example]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 3"
+
+[test_min_float16]
+status = "pass"
+
+[test_min_float32]
+status = "pass"
+
+[test_min_float64]
+status = "pass"
+
+[test_min_int16]
+status = "pass"
+
+[test_min_int32]
+status = "pass"
+
+[test_min_int64]
+status = "pass"
+
+[test_min_int8]
+status = "pass"
+
+[test_min_one_input]
+status = "skip-codegen"
+reason = "Invalid input count: expected 2, got 1"
+
+[test_min_two_inputs]
+status = "pass"
+
+[test_min_uint16]
+status = "pass"
+
+[test_min_uint32]
+status = "pass"
+
+[test_min_uint64]
+status = "pass"
+
+[test_min_uint8]
+status = "pass"
+
+[test_mish]
+status = "pass"
+
+[test_mish_expanded]
+status = "pass"
+
+[test_mod_broadcast]
+status = "pass"
+
+[test_mod_int64_fmod]
+status = "skip-compile"
+reason = "no method named `fmod` found for struct `burn::Tensor<1, burn::prelude::Int>` in the current scope: method not found in `burn::Tensor<1, burn::prelude::Int>`"
+
+[test_mod_mixed_sign_float16]
+status = "pass"
+
+[test_mod_mixed_sign_float32]
+status = "pass"
+
+[test_mod_mixed_sign_float64]
+status = "pass"
+
+[test_mod_mixed_sign_int16]
+status = "pass"
+
+[test_mod_mixed_sign_int32]
+status = "pass"
+
+[test_mod_mixed_sign_int64]
+status = "pass"
+
+[test_mod_mixed_sign_int8]
+status = "pass"
+
+[test_mod_uint16]
+status = "pass"
+
+[test_mod_uint32]
+status = "pass"
+
+[test_mod_uint64]
+status = "pass"
+
+[test_mod_uint8]
+status = "pass"
+
+[test_momentum]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Momentum used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_momentum_multiple]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Momentum used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_mul]
+status = "pass"
+
+[test_mul_bcast]
+status = "pass"
+
+[test_mul_example]
+status = "pass"
+
+[test_mul_int16]
+status = "pass"
+
+[test_mul_int8]
+status = "pass"
+
+[test_mul_uint16]
+status = "pass"
+
+[test_mul_uint32]
+status = "pass"
+
+[test_mul_uint64]
+status = "pass"
+
+[test_mul_uint8]
+status = "pass"
+
+[test_mvn]
+status = "pass"
+
+[test_mvn_expanded]
+status = "pass"
+
+[test_mvn_expanded_ver18]
+status = "pass"
+
+[test_neg]
+status = "pass"
+
+[test_neg_example]
+status = "pass"
+
+[test_nesterov_momentum]
+status = "skip-codegen"
+reason = "model contains 1 custom op(s) with no covering inference hook: - ai.onnx.preview.training::Momentum used by 1 node(s) Register hooks via ModelGen::register_custom_op."
+
+[test_nllloss_NC]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NC_expanded]
+status = "pass"
+
+[test_nllloss_NCd1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1_mean_weight_negative_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1_mean_weight_negative_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1_weight_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1_weight_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1_weight_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_expanded]
+status = "pass"
+
+[test_nllloss_NCd1d2_no_weight_reduction_mean_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_no_weight_reduction_mean_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2_reduction_mean]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_reduction_mean_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2_reduction_sum]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_reduction_sum_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2_with_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_with_weight_expanded]
+status = "pass"
+
+[test_nllloss_NCd1d2_with_weight_reduction_mean]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_with_weight_reduction_mean_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2_with_weight_reduction_sum]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_with_weight_reduction_sum_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2_with_weight_reduction_sum_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2_with_weight_reduction_sum_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2d3_none_no_weight_negative_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2d3_none_no_weight_negative_ii_expanded]
+status = "pass"
+
+[test_nllloss_NCd1d2d3_sum_weight_high_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2d3_sum_weight_high_ii_expanded]
+status = "fail-compare"
+reason = "nllloss op family comparison failure"
+tracking = "#311"
+
+[test_nllloss_NCd1d2d3d4d5_mean_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2d3d4d5_mean_weight_expanded]
+status = "pass"
+
+[test_nllloss_NCd1d2d3d4d5_none_no_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_nllloss_NCd1d2d3d4d5_none_no_weight_expanded]
+status = "pass"
+
+[test_nonmaxsuppression_center_point_box_format]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_flipped_coordinates]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_identical_boxes]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_limit_output_size]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_single_box]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_suppress_by_IOU]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_suppress_by_IOU_and_scores]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_two_batches]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonmaxsuppression_two_classes]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NonMaxSuppression (node 'nonmaxsuppression1')"
+
+[test_nonzero_example]
+status = "pass"
+
+[test_not_2d]
+status = "pass"
+
+[test_not_3d]
+status = "pass"
+
+[test_not_4d]
+status = "pass"
+
+[test_onehot_negative_indices]
+status = "pass"
+
+[test_onehot_with_axis]
+status = "pass"
+
+[test_onehot_with_negative_axis]
+status = "pass"
+
+[test_onehot_without_axis]
+status = "pass"
+
+[test_optional_get_element_optional_sequence]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalGetElement (node 'optionalgetelement1')"
+
+[test_optional_get_element_optional_tensor]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalGetElement (node 'optionalgetelement1')"
+
+[test_optional_get_element_sequence]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalGetElement (node 'optionalgetelement1')"
+
+[test_optional_get_element_tensor]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalGetElement (node 'optionalgetelement1')"
+
+[test_optional_has_element_empty_no_input_name_optional_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_empty_no_input_name_tensor_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_empty_no_input_optional_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_empty_no_input_tensor_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_empty_optional_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_optional_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_optional_has_element_tensor_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): OptionalHasElement (node 'optionalhaselement1')"
+
+[test_or2d]
+status = "pass"
+
+[test_or3d]
+status = "pass"
+
+[test_or4d]
+status = "pass"
+
+[test_or_bcast3v1d]
+status = "pass"
+
+[test_or_bcast3v2d]
+status = "pass"
+
+[test_or_bcast4v2d]
+status = "pass"
+
+[test_or_bcast4v3d]
+status = "pass"
+
+[test_or_bcast4v4d]
+status = "pass"
+
+[test_pow]
+status = "pass"
+
+[test_pow_bcast_array]
+status = "pass"
+
+[test_pow_bcast_scalar]
+status = "pass"
+
+[test_pow_example]
+status = "pass"
+
+[test_pow_types_float32_int32]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1>`, found `Tensor<1, Int>`"
+
+[test_pow_types_float32_int64]
+status = "skip-compile"
+reason = "mismatched types: expected `Tensor<1>`, found `Tensor<1, Int>`"
+
+[test_pow_types_float32_uint32]
+status = "skip-codegen"
+reason = "pow function requires RHS to be int or float type"
+
+[test_pow_types_float32_uint64]
+status = "skip-codegen"
+reason = "pow function requires RHS to be int or float type"
+
+[test_pow_types_int32_float32]
+status = "skip-compile"
+reason = "no method named `powf` found for struct `burn::Tensor<1, burn::prelude::Int>` in the current scope"
+
+[test_pow_types_int32_int32]
+status = "pass"
+
+[test_pow_types_int64_float32]
+status = "skip-compile"
+reason = "no method named `powf` found for struct `burn::Tensor<1, burn::prelude::Int>` in the current scope"
+
+[test_pow_types_int64_int64]
+status = "pass"
+
+[test_prelu_broadcast]
+status = "pass"
+
+[test_prelu_broadcast_expanded]
+status = "pass"
+
+[test_prelu_example]
+status = "pass"
+
+[test_prelu_example_expanded]
+status = "pass"
+
+[test_qlinearconv]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): QLinearConv (node 'qlinearconv1')"
+
+[test_qlinearmatmul_2D_int8_float16]
+status = "fail-compare"
+reason = "demoted by `cargo xtask update-expectations` after test failure"
+
+[test_qlinearmatmul_2D_int8_float32]
+status = "fail-compare"
+reason = "demoted by `cargo xtask update-expectations` after test failure"
+
+[test_qlinearmatmul_2D_uint8_float16]
+status = "pass"
+
+[test_qlinearmatmul_2D_uint8_float32]
+status = "pass"
+
+[test_qlinearmatmul_3D_int8_float16]
+status = "skip-codegen"
+reason = "Node 'qlinearmatmul1' (QLinearMatMul): Type mismatch: expected Rank compatibility between a and a_scale: scale can be rank 0, rank 1 (if a is rank 2), or match a's rank, got a rank 3 vs a_scale rank 1"
+
+[test_qlinearmatmul_3D_int8_float32]
+status = "skip-codegen"
+reason = "Node 'qlinearmatmul1' (QLinearMatMul): Type mismatch: expected Rank compatibility between a and a_scale: scale can be rank 0, rank 1 (if a is rank 2), or match a's rank, got a rank 3 vs a_scale rank 1"
+
+[test_qlinearmatmul_3D_uint8_float16]
+status = "skip-codegen"
+reason = "Node 'qlinearmatmul1' (QLinearMatMul): Type mismatch: expected Rank compatibility between a and a_scale: scale can be rank 0, rank 1 (if a is rank 2), or match a's rank, got a rank 3 vs a_scale rank 1"
+
+[test_qlinearmatmul_3D_uint8_float32]
+status = "skip-codegen"
+reason = "Node 'qlinearmatmul1' (QLinearMatMul): Type mismatch: expected Rank compatibility between a and a_scale: scale can be rank 0, rank 1 (if a is rank 2), or match a's rank, got a rank 3 vs a_scale rank 1"
+
+[test_quantizelinear]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): Type mismatch: expected on-device tensor for y_scale, got ScalarNative(F32)"
+
+[test_quantizelinear_axis]
+status = "pass"
+
+[test_quantizelinear_blocked_asymmetric]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): QuantizeLinear: blocked quantization (block_size=2) is not supported yet"
+
+[test_quantizelinear_blocked_symmetric]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): QuantizeLinear: blocked quantization (block_size=2) is not supported yet"
+
+[test_quantizelinear_e4m3fn]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): Type mismatch: expected on-device tensor for y_scale, got ScalarNative(F32)"
+
+[test_quantizelinear_e5m2]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): Type mismatch: expected on-device tensor for y_scale, got ScalarNative(F32)"
+
+[test_quantizelinear_float4e2m1]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): QuantizeLinear: output dtype F32 is not supported yet"
+
+[test_quantizelinear_int16]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): Type mismatch: expected on-device tensor for y_scale, got ScalarNative(F32)"
+
+[test_quantizelinear_int4]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): QuantizeLinear: output dtype F32 is not supported yet"
+
+[test_quantizelinear_uint16]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): Type mismatch: expected on-device tensor for y_scale, got ScalarNative(F32)"
+
+[test_quantizelinear_uint4]
+status = "skip-codegen"
+reason = "Node 'quantizelinear1' (QuantizeLinear): QuantizeLinear: output dtype F32 is not supported yet"
+
+[test_range_float_type_positive_delta]
+status = "skip-compile"
+reason = "can't compare `f32` with `{integer}`: no implementation for `f32 == {integer}`"
+
+[test_range_float_type_positive_delta_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build Loop body: Type inference failed: Invalid type inference: Node 'identity2' output 'identity2_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead.\")"
+
+[test_range_int32_type_negative_delta]
+status = "pass"
+
+[test_range_int32_type_negative_delta_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: Custom(\"Failed to build Loop body: Type inference failed: Invalid type inference: Node 'identity2' output 'identity2_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead.\")"
+
+[test_reciprocal]
+status = "pass"
+
+[test_reciprocal_example]
+status = "pass"
+
+[test_reduce_l1_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_l1_default_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_l1_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_l1_default_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_l1_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_l1_do_not_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_l1_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_l1_do_not_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_l1_empty_set]
+status = "pass"
+
+[test_reduce_l1_empty_set_expanded]
+status = "pass"
+
+[test_reduce_l1_keep_dims_example]
+status = "pass"
+
+[test_reduce_l1_keep_dims_example_expanded]
+status = "pass"
+
+[test_reduce_l1_keep_dims_random]
+status = "pass"
+
+[test_reduce_l1_keep_dims_random_expanded]
+status = "pass"
+
+[test_reduce_l1_negative_axes_keep_dims_example]
+status = "pass"
+
+[test_reduce_l1_negative_axes_keep_dims_example_expanded]
+status = "pass"
+
+[test_reduce_l1_negative_axes_keep_dims_random]
+status = "pass"
+
+[test_reduce_l1_negative_axes_keep_dims_random_expanded]
+status = "pass"
+
+[test_reduce_l2_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_l2_default_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_l2_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_l2_default_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_l2_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_l2_do_not_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_l2_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_l2_do_not_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_l2_empty_set]
+status = "pass"
+
+[test_reduce_l2_empty_set_expanded]
+status = "pass"
+
+[test_reduce_l2_keep_dims_example]
+status = "pass"
+
+[test_reduce_l2_keep_dims_example_expanded]
+status = "pass"
+
+[test_reduce_l2_keep_dims_random]
+status = "pass"
+
+[test_reduce_l2_keep_dims_random_expanded]
+status = "pass"
+
+[test_reduce_l2_negative_axes_keep_dims_example]
+status = "pass"
+
+[test_reduce_l2_negative_axes_keep_dims_example_expanded]
+status = "pass"
+
+[test_reduce_l2_negative_axes_keep_dims_random]
+status = "pass"
+
+[test_reduce_l2_negative_axes_keep_dims_random_expanded]
+status = "pass"
+
+[test_reduce_log_sum_asc_axes]
+status = "pass"
+
+[test_reduce_log_sum_asc_axes_expanded]
+status = "pass"
+
+[test_reduce_log_sum_default]
+status = "pass"
+
+[test_reduce_log_sum_default_expanded]
+status = "pass"
+
+[test_reduce_log_sum_desc_axes]
+status = "pass"
+
+[test_reduce_log_sum_desc_axes_expanded]
+status = "pass"
+
+[test_reduce_log_sum_empty_set]
+status = "pass"
+
+[test_reduce_log_sum_empty_set_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_log_sum_exp_default_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_log_sum_exp_default_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_log_sum_exp_do_not_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_log_sum_exp_do_not_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_empty_set]
+status = "fail-compare"
+reason = "demoted by `cargo xtask update-expectations` after test failure"
+
+[test_reduce_log_sum_exp_empty_set_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_keepdims_example]
+status = "pass"
+
+[test_reduce_log_sum_exp_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_keepdims_random]
+status = "pass"
+
+[test_reduce_log_sum_exp_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_log_sum_exp_negative_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_log_sum_exp_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_log_sum_exp_negative_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_log_sum_negative_axes]
+status = "pass"
+
+[test_reduce_log_sum_negative_axes_expanded]
+status = "pass"
+
+[test_reduce_max_bool_inputs]
+status = "pass"
+
+[test_reduce_max_default_axes_keepdim_example]
+status = "pass"
+
+[test_reduce_max_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_max_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_max_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_max_empty_set]
+status = "fail-compare"
+reason = "demoted by `cargo xtask update-expectations` after test failure"
+
+[test_reduce_max_keepdims_example]
+status = "pass"
+
+[test_reduce_max_keepdims_random]
+status = "pass"
+
+[test_reduce_max_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_max_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_mean_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_mean_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_mean_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_mean_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_mean_keepdims_example]
+status = "pass"
+
+[test_reduce_mean_keepdims_random]
+status = "pass"
+
+[test_reduce_mean_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_mean_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_min_bool_inputs]
+status = "pass"
+
+[test_reduce_min_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_min_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_min_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_min_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_min_empty_set]
+status = "fail-compare"
+reason = "demoted by `cargo xtask update-expectations` after test failure"
+
+[test_reduce_min_keepdims_example]
+status = "pass"
+
+[test_reduce_min_keepdims_random]
+status = "pass"
+
+[test_reduce_min_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_min_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_prod_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_prod_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_prod_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_prod_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_prod_empty_set]
+status = "pass"
+
+[test_reduce_prod_keepdims_example]
+status = "pass"
+
+[test_reduce_prod_keepdims_random]
+status = "pass"
+
+[test_reduce_prod_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_prod_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_empty_axes_input_noop]
+status = "pass"
+
+[test_reduce_sum_empty_axes_input_noop_example]
+status = "pass"
+
+[test_reduce_sum_empty_set]
+status = "pass"
+
+[test_reduce_sum_empty_set_non_reduced_axis_zero]
+status = "pass"
+
+[test_reduce_sum_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_square_default_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_square_default_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_sum_square_default_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_square_default_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_sum_square_do_not_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_square_do_not_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_sum_square_do_not_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_square_do_not_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_sum_square_empty_set]
+status = "pass"
+
+[test_reduce_sum_square_empty_set_expanded]
+status = "pass"
+
+[test_reduce_sum_square_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_square_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_sum_square_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_square_keepdims_random_expanded]
+status = "pass"
+
+[test_reduce_sum_square_negative_axes_keepdims_example]
+status = "pass"
+
+[test_reduce_sum_square_negative_axes_keepdims_example_expanded]
+status = "pass"
+
+[test_reduce_sum_square_negative_axes_keepdims_random]
+status = "pass"
+
+[test_reduce_sum_square_negative_axes_keepdims_random_expanded]
+status = "pass"
+
+[test_reflect_pad]
+status = "pass"
+
+[test_regex_full_match_basic]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RegexFullMatch (node 'regexfullmatch1')"
+
+[test_regex_full_match_email_domain]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RegexFullMatch (node 'regexfullmatch1')"
+
+[test_regex_full_match_empty]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RegexFullMatch (node 'regexfullmatch1')"
+
+[test_relu]
+status = "pass"
+
+[test_relu_expanded_ver18]
+status = "pass"
+
+[test_reshape_allowzero_reordered]
+status = "fail-compare"
+reason = "comparison against reference tensor fails (classified by M2 first-run sweep; root cause not yet triaged)"
+tracking = "#311"
+
+[test_reshape_extended_dims]
+status = "pass"
+
+[test_reshape_negative_dim]
+status = "pass"
+
+[test_reshape_negative_extended_dims]
+status = "pass"
+
+[test_reshape_one_dim]
+status = "pass"
+
+[test_reshape_reduced_dims]
+status = "pass"
+
+[test_reshape_reordered_all_dims]
+status = "pass"
+
+[test_reshape_reordered_last_dims]
+status = "pass"
+
+[test_reshape_zero_and_negative_dim]
+status = "pass"
+
+[test_reshape_zero_dim]
+status = "pass"
+
+[test_resize_downsample_scales_cubic]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_scales_cubic_A_n0p5_exclude_outside]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'exclude_outside': exclude_outside other than 0 is not supported"
+
+[test_resize_downsample_scales_cubic_align_corners]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_scales_cubic_antialias]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'antialias': antialias other than 0 is not supported"
+
+[test_resize_downsample_scales_linear]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_scales_linear_align_corners]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_scales_linear_antialias]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'antialias': antialias other than 0 is not supported"
+
+[test_resize_downsample_scales_linear_half_pixel_symmetric]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'coordinate_transformation_mode': Unsupported coordinate transformation mode: half_pixel_symmetric"
+
+[test_resize_downsample_scales_nearest]
+status = "pass"
+
+[test_resize_downsample_sizes_cubic]
+status = "pass"
+
+[test_resize_downsample_sizes_cubic_antialias]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'antialias': antialias other than 0 is not supported"
+
+[test_resize_downsample_sizes_linear_antialias]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'antialias': antialias other than 0 is not supported"
+
+[test_resize_downsample_sizes_linear_pytorch_half_pixel]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_sizes_nearest]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_downsample_sizes_nearest_not_larger]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_downsample_sizes_nearest_not_smaller]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_tf_crop_and_resize]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_tf_crop_and_resize_axes_2_3]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_tf_crop_and_resize_axes_3_2]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_tf_crop_and_resize_extrapolation_value]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'extrapolation_value': extrapolation_value other than 0.0 is not supported"
+
+[test_resize_upsample_scales_cubic]
+status = "pass"
+
+[test_resize_upsample_scales_cubic_A_n0p5_exclude_outside]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'exclude_outside': exclude_outside other than 0 is not supported"
+
+[test_resize_upsample_scales_cubic_align_corners]
+status = "pass"
+
+[test_resize_upsample_scales_cubic_asymmetric]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_upsample_scales_linear]
+status = "pass"
+
+[test_resize_upsample_scales_linear_align_corners]
+status = "pass"
+
+[test_resize_upsample_scales_linear_half_pixel_symmetric]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'coordinate_transformation_mode': Unsupported coordinate transformation mode: half_pixel_symmetric"
+
+[test_resize_upsample_scales_nearest]
+status = "pass"
+
+[test_resize_upsample_scales_nearest_axes_2_3]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_upsample_scales_nearest_axes_3_2]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_upsample_sizes_cubic]
+status = "pass"
+
+[test_resize_upsample_sizes_nearest]
+status = "pass"
+
+[test_resize_upsample_sizes_nearest_axes_2_3]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_upsample_sizes_nearest_axes_3_2]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_upsample_sizes_nearest_ceil_half_pixel]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_upsample_sizes_nearest_floor_align_corners]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_resize_upsample_sizes_nearest_not_larger]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'keep_aspect_ratio_policy': keep_aspect_ratio_policy other than 'stretch' is not supported"
+
+[test_resize_upsample_sizes_nearest_not_smaller]
+status = "skip-codegen"
+reason = "Node 'resize1' (Resize): Invalid attribute 'axes': custom axes attribute is not supported"
+
+[test_resize_upsample_sizes_nearest_round_prefer_ceil_asymmetric]
+status = "fail-compare"
+reason = "resize op family comparison failure"
+tracking = "#311"
+
+[test_reversesequence_batch]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ReverseSequence (node 'reversesequence1')"
+
+[test_reversesequence_time]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): ReverseSequence (node 'reversesequence1')"
+
+[test_rms_normalization_2d_axis0]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_2d_axis0_expanded]
+status = "pass"
+
+[test_rms_normalization_2d_axis1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_2d_axis1_expanded]
+status = "pass"
+
+[test_rms_normalization_2d_axis_negative_1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_2d_axis_negative_1_expanded]
+status = "pass"
+
+[test_rms_normalization_2d_axis_negative_2]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_2d_axis_negative_2_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis0_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis0_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis1_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis1_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis2_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis2_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis_negative_1_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis_negative_1_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis_negative_2_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis_negative_2_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_3d_axis_negative_3_epsilon]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_3d_axis_negative_3_epsilon_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis0]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis0_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis1_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis2]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis2_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis3]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis3_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis_negative_1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis_negative_1_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis_negative_2]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis_negative_2_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis_negative_3]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis_negative_3_expanded]
+status = "pass"
+
+[test_rms_normalization_4d_axis_negative_4]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_4d_axis_negative_4_expanded]
+status = "pass"
+
+[test_rms_normalization_default_axis]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RMSNormalization (node 'rmsnormalization1')"
+
+[test_rms_normalization_default_axis_expanded]
+status = "pass"
+
+[test_rnn_seq_length]
+status = "pass"
+
+[test_roialign_aligned_false]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RoiAlign (node 'roialign1')"
+
+[test_roialign_aligned_true]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RoiAlign (node 'roialign1')"
+
+[test_roialign_mode_max]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RoiAlign (node 'roialign1')"
+
+[test_rotary_embedding]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_3d_input]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_3d_input_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_interleaved]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_interleaved_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_no_position_ids]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_no_position_ids_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_no_position_ids_interleaved]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_no_position_ids_interleaved_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_no_position_ids_rotary_dim]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_no_position_ids_rotary_dim_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_with_interleaved_rotary_dim]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_with_interleaved_rotary_dim_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_rotary_embedding_with_rotary_dim]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): RotaryEmbedding (node 'rotaryembedding1')"
+
+[test_rotary_embedding_with_rotary_dim_expanded]
+status = "skip-codegen"
+reason = "Config extraction failed: TypeMismatch { expected: \"Tensor for split sizes input\", actual: \"Shape(2)\" }"
+
+[test_round]
+status = "pass"
+
+[test_scan9_sum]
+status = "pass"
+
+[test_scan_sum]
+status = "skip-codegen"
+reason = "Ident is not allowed to be empty; use Option<Ident>"
+
+[test_scatter_elements_with_axis]
+status = "pass"
+
+[test_scatter_elements_with_duplicate_indices]
+status = "pass"
+
+[test_scatter_elements_with_negative_indices]
+status = "pass"
+
+[test_scatter_elements_with_reduction_max]
+status = "pass"
+
+[test_scatter_elements_with_reduction_min]
+status = "pass"
+
+[test_scatter_elements_without_axis]
+status = "pass"
+
+[test_scatter_with_axis]
+status = "skip-codegen"
+reason = "Unsupported node type for inputs: Scatter(ScatterNode { name: \"scatter1\", inputs: [Argument { name: \"data\", ty: Tensor(TensorType { dtype: F32, rank: 2, static_shape: Some([Some(1), Some(5)]) }), value_source: Dynamic..."
+
+[test_scatter_without_axis]
+status = "skip-codegen"
+reason = "Unsupported node type for inputs: Scatter(ScatterNode { name: \"scatter1\", inputs: [Argument { name: \"data\", ty: Tensor(TensorType { dtype: F32, rank: 2, static_shape: Some([Some(3), Some(3)]) }), value_source: Dynamic..."
+
+[test_scatternd]
+status = "pass"
+
+[test_scatternd_add]
+status = "pass"
+
+[test_scatternd_max]
+status = "pass"
+
+[test_scatternd_min]
+status = "pass"
+
+[test_scatternd_multiply]
+status = "pass"
+
+[test_sce_NCd1_mean_weight_negative_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1_mean_weight_negative_ii_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1_mean_weight_negative_ii_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1_mean_weight_negative_ii_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3_none_no_weight_negative_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3_none_no_weight_negative_ii_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3_none_no_weight_negative_ii_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3_none_no_weight_negative_ii_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3_sum_weight_high_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3_sum_weight_high_ii_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3_sum_weight_high_ii_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3_sum_weight_high_ii_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3d4d5_mean_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3d4d5_mean_weight_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3d4d5_mean_weight_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3d4d5_mean_weight_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3d4d5_none_no_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3d4d5_none_no_weight_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_NCd1d2d3d4d5_none_no_weight_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_NCd1d2d3d4d5_none_no_weight_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_3d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_3d_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_3d_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_3d_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_3d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_3d_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii_3d_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_3d_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii_4d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_4d_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii_4d_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_4d_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_no_weight_ii_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_no_weight_ii_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_3d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_3d_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii_3d_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_3d_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii_4d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_4d_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii_4d_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_4d_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_ii_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_ii_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_mean_weight_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_mean_weight_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_none]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_none_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_none_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_none_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_none_weights]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_none_weights_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_none_weights_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_none_weights_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_sum]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_sum_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_sce_sum_log_prob]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SoftmaxCrossEntropyLoss (node 'softmaxcrossentropyloss1')"
+
+[test_sce_sum_log_prob_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): NegativeLogLikelihoodLoss (node 'negativeloglikelihoodloss1')"
+
+[test_selu]
+status = "skip-codegen"
+reason = "Selu: custom alpha (2) is not supported by Burn, only the default (1.6732631921768188) is supported"
+
+[test_selu_default]
+status = "pass"
+
+[test_selu_default_expanded_ver18]
+status = "pass"
+
+[test_selu_example]
+status = "skip-codegen"
+reason = "Selu: custom alpha (2) is not supported by Burn, only the default (1.6732631921768188) is supported"
+
+[test_selu_example_expanded_ver18]
+status = "pass"
+
+[test_selu_expanded_ver18]
+status = "pass"
+
+[test_sequence_insert_at_back]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceInsert (node 'sequenceinsert1')"
+
+[test_sequence_insert_at_front]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceInsert (node 'sequenceinsert1')"
+
+[test_sequence_map_add_1_sequence_1_tensor]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_add_1_sequence_1_tensor_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1')"
+
+[test_sequence_map_add_2_sequences]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_add_2_sequences_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1')"
+
+[test_sequence_map_extract_shapes]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_extract_shapes_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1')"
+
+[test_sequence_map_identity_1_sequence]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_identity_1_sequence_1_tensor]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_identity_1_sequence_1_tensor_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1'), SequenceEmpty (node 'sequenceempty2')"
+
+[test_sequence_map_identity_1_sequence_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1')"
+
+[test_sequence_map_identity_2_sequences]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceMap (node 'sequencemap1')"
+
+[test_sequence_map_identity_2_sequences_expanded]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SequenceLength (node 'sequencelength1'), SequenceEmpty (node 'sequenceempty1'), SequenceEmpty (node 'sequenceempty2')"
+
+[test_shape]
+status = "pass"
+
+[test_shape_clip_end]
+status = "pass"
+
+[test_shape_clip_start]
+status = "pass"
+
+[test_shape_end_1]
+status = "pass"
+
+[test_shape_end_negative_1]
+status = "pass"
+
+[test_shape_example]
+status = "pass"
+
+[test_shape_start_1]
+status = "pass"
+
+[test_shape_start_1_end_2]
+status = "pass"
+
+[test_shape_start_1_end_negative_1]
+status = "pass"
+
+[test_shape_start_greater_than_end]
+status = "pass"
+
+[test_shape_start_negative_1]
+status = "pass"
+
+[test_shrink_hard]
+status = "pass"
+
+[test_shrink_hard_expanded_ver18]
+status = "pass"
+
+[test_shrink_soft]
+status = "pass"
+
+[test_shrink_soft_expanded_ver18]
+status = "pass"
+
+[test_sigmoid]
+status = "pass"
+
+[test_sigmoid_example]
+status = "pass"
+
+[test_sign]
+status = "pass"
+
+[test_simple_rnn_batchwise]
+status = "pass"
+
+[test_simple_rnn_defaults]
+status = "pass"
+
+[test_simple_rnn_with_initial_bias]
+status = "pass"
+
+[test_sin]
+status = "pass"
+
+[test_sin_example]
+status = "pass"
+
+[test_sinh]
+status = "pass"
+
+[test_sinh_example]
+status = "pass"
+
+[test_size]
+status = "pass"
+
+[test_size_example]
+status = "pass"
+
+[test_slice]
+status = "pass"
+
+[test_slice_default_axes]
+status = "pass"
+
+[test_slice_default_steps]
+status = "pass"
+
+[test_slice_end_out_of_bounds]
+status = "fail-compare"
+reason = "slice with negative indices or out-of-bounds ends: codegen default-axes path does not normalize negatives (pre-existing)"
+tracking = "#314"
+
+[test_slice_neg]
+status = "fail-compare"
+reason = "slice with negative indices or out-of-bounds ends: codegen default-axes path does not normalize negatives (pre-existing)"
+tracking = "#314"
+
+[test_slice_neg_steps]
+status = "fail-compare"
+reason = "slice with negative indices or out-of-bounds ends: codegen default-axes path does not normalize negatives (pre-existing)"
+tracking = "#314"
+
+[test_slice_negative_axes]
+status = "pass"
+
+[test_slice_start_out_of_bounds]
+status = "fail-compare"
+reason = "slice with negative indices or out-of-bounds ends: codegen default-axes path does not normalize negatives (pre-existing)"
+tracking = "#314"
+
+[test_softmax_axis_0]
+status = "pass"
+
+[test_softmax_axis_0_expanded]
+status = "pass"
+
+[test_softmax_axis_0_expanded_ver18]
+status = "pass"
+
+[test_softmax_axis_1]
+status = "pass"
+
+[test_softmax_axis_1_expanded]
+status = "pass"
+
+[test_softmax_axis_1_expanded_ver18]
+status = "pass"
+
+[test_softmax_axis_2]
+status = "pass"
+
+[test_softmax_axis_2_expanded]
+status = "pass"
+
+[test_softmax_axis_2_expanded_ver18]
+status = "pass"
+
+[test_softmax_default_axis]
+status = "pass"
+
+[test_softmax_default_axis_expanded]
+status = "pass"
+
+[test_softmax_default_axis_expanded_ver18]
+status = "pass"
+
+[test_softmax_example]
+status = "pass"
+
+[test_softmax_example_expanded]
+status = "pass"
+
+[test_softmax_example_expanded_ver18]
+status = "pass"
+
+[test_softmax_large_number]
+status = "pass"
+
+[test_softmax_large_number_expanded]
+status = "pass"
+
+[test_softmax_large_number_expanded_ver18]
+status = "pass"
+
+[test_softmax_negative_axis]
+status = "pass"
+
+[test_softmax_negative_axis_expanded]
+status = "pass"
+
+[test_softmax_negative_axis_expanded_ver18]
+status = "pass"
+
+[test_softplus]
+status = "pass"
+
+[test_softplus_example]
+status = "pass"
+
+[test_softplus_example_expanded_ver18]
+status = "pass"
+
+[test_softplus_expanded_ver18]
+status = "pass"
+
+[test_softsign]
+status = "pass"
+
+[test_softsign_example]
+status = "pass"
+
+[test_softsign_example_expanded_ver18]
+status = "pass"
+
+[test_softsign_expanded_ver18]
+status = "pass"
+
+[test_spacetodepth]
+status = "pass"
+
+[test_spacetodepth_example]
+status = "pass"
+
+[test_split_1d_uneven_split_opset18]
+status = "pass"
+
+[test_split_2d_uneven_split_opset18]
+status = "pass"
+
+[test_split_equal_parts_1d_opset13]
+status = "pass"
+
+[test_split_equal_parts_1d_opset18]
+status = "pass"
+
+[test_split_equal_parts_2d]
+status = "pass"
+
+[test_split_equal_parts_2d_opset13]
+status = "pass"
+
+[test_split_equal_parts_default_axis_opset13]
+status = "pass"
+
+[test_split_equal_parts_default_axis_opset18]
+status = "pass"
+
+[test_split_to_sequence_1]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SplitToSequence (node 'splittosequence1')"
+
+[test_split_to_sequence_2]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SplitToSequence (node 'splittosequence1')"
+
+[test_split_to_sequence_nokeepdims]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): SplitToSequence (node 'splittosequence1')"
+
+[test_split_variable_parts_1d_opset13]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_variable_parts_1d_opset18]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_variable_parts_2d_opset13]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_variable_parts_2d_opset18]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_variable_parts_default_axis_opset13]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_variable_parts_default_axis_opset18]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_zero_size_splits_opset13]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_split_zero_size_splits_opset18]
+status = "skip-codegen"
+reason = "Runtime split sizes are not supported in burn-onnx"
+
+[test_sqrt]
+status = "pass"
+
+[test_sqrt_example]
+status = "pass"
+
+[test_squeeze]
+status = "pass"
+
+[test_squeeze_negative_axes]
+status = "fail-compare"
+reason = "runtime squeeze axes: negative indices are normalized but burn squeeze_dims still rejects multi-axis squeeze; needs ordering fix"
+tracking = "#314"
+
+[test_stft]
+status = "skip-codegen"
+reason = "Node 'stft1' (Stft): STFT: frame_step must be a compile-time constant"
+
+[test_stft_with_window]
+status = "skip-codegen"
+reason = "Node 'stft1' (Stft): STFT: frame_step must be a compile-time constant"
+
+[test_string_concat]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringConcat (node 'stringconcat1')"
+
+[test_string_concat_broadcasting]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringConcat (node 'stringconcat1')"
+
+[test_string_concat_empty_string]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringConcat (node 'stringconcat1')"
+
+[test_string_concat_utf8]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringConcat (node 'stringconcat1')"
+
+[test_string_concat_zero_dimensional]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringConcat (node 'stringconcat1')"
+
+[test_string_split_basic]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_string_split_consecutive_delimiters]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_string_split_empty_string_delimiter]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_string_split_empty_tensor]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_string_split_maxsplit]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_string_split_no_delimiter]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringSplit (node 'stringsplit1')"
+
+[test_strnormalizer_export_monday_casesensintive_lower]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_strnormalizer_export_monday_casesensintive_nochangecase]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_strnormalizer_export_monday_casesensintive_upper]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_strnormalizer_export_monday_empty_output]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_strnormalizer_export_monday_insensintive_upper_twodim]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_strnormalizer_nostopwords_nochangecase]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): StringNormalizer (node 'stringnormalizer1')"
+
+[test_sub]
+status = "pass"
+
+[test_sub_bcast]
+status = "pass"
+
+[test_sub_example]
+status = "pass"
+
+[test_sub_int16]
+status = "pass"
+
+[test_sub_int8]
+status = "pass"
+
+[test_sub_uint16]
+status = "pass"
+
+[test_sub_uint32]
+status = "pass"
+
+[test_sub_uint64]
+status = "pass"
+
+[test_sub_uint8]
+status = "pass"
+
+[test_sum_example]
+status = "pass"
+
+[test_sum_one_input]
+status = "pass"
+
+[test_sum_two_inputs]
+status = "pass"
+
+[test_swish]
+status = "pass"
+
+[test_swish_expanded]
+status = "pass"
+
+[test_tan]
+status = "pass"
+
+[test_tan_example]
+status = "pass"
+
+[test_tanh]
+status = "pass"
+
+[test_tanh_example]
+status = "pass"
+
+[test_tensorscatter]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TensorScatter (node 'tensorscatter1')"
+
+[test_tensorscatter_3d]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TensorScatter (node 'tensorscatter1')"
+
+[test_tensorscatter_circular]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TensorScatter (node 'tensorscatter1')"
+
+[test_tfidfvectorizer_tf_batch_onlybigrams_skip0]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_batch_onlybigrams_skip5]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_batch_uniandbigrams_skip5]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_only_bigrams_skip0]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_onlybigrams_levelempty]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_onlybigrams_skip5]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_tfidfvectorizer_tf_uniandbigrams_skip5]
+status = "skip-codegen"
+reason = "Unsupported ONNX operation(s): TfIdfVectorizer (node 'tfidfvectorizer1')"
+
+[test_thresholdedrelu]
+status = "pass"
+
+[test_thresholdedrelu_default]
+status = "pass"
+
+[test_thresholdedrelu_default_expanded_ver18]
+status = "pass"
+
+[test_thresholdedrelu_example]
+status = "pass"
+
+[test_thresholdedrelu_example_expanded_ver18]
+status = "pass"
+
+[test_thresholdedrelu_expanded_ver18]
+status = "pass"
+
+[test_tile]
+status = "pass"
+
+[test_tile_precomputed]
+status = "pass"
+
+[test_top_k]
+status = "pass"
+
+[test_top_k_negative_axis]
+status = "pass"
+
+[test_top_k_same_values]
+status = "pass"
+
+[test_top_k_same_values_2d]
+status = "pass"
+
+[test_top_k_same_values_largest]
+status = "pass"
+
+[test_top_k_smallest]
+status = "skip-codegen"
+reason = "Node 'topk1' (TopK): TopK: only largest elements is supported"
+
+[test_top_k_uint64]
+status = "pass"
+
+[test_training_dropout]
+status = "pass"
+
+[test_training_dropout_default]
+status = "pass"
+
+[test_training_dropout_default_mask]
+status = "pass"
+
+[test_training_dropout_mask]
+status = "pass"
+
+[test_training_dropout_zero_ratio]
+status = "pass"
+
+[test_training_dropout_zero_ratio_mask]
+status = "pass"
+
+[test_transpose_all_permutations_0]
+status = "pass"
+
+[test_transpose_all_permutations_1]
+status = "pass"
+
+[test_transpose_all_permutations_2]
+status = "pass"
+
+[test_transpose_all_permutations_3]
+status = "pass"
+
+[test_transpose_all_permutations_4]
+status = "pass"
+
+[test_transpose_all_permutations_5]
+status = "pass"
+
+[test_transpose_default]
+status = "pass"
+
+[test_tril]
+status = "pass"
+
+[test_tril_neg]
+status = "fail-compare"
+reason = "tril op family comparison failure"
+tracking = "#311"
+
+[test_tril_one_row_neg]
+status = "pass"
+
+[test_tril_out_neg]
+status = "fail-compare"
+reason = "tril op family comparison failure"
+tracking = "#311"
+
+[test_tril_out_pos]
+status = "fail-compare"
+reason = "tril op family comparison failure"
+tracking = "#311"
+
+[test_tril_pos]
+status = "fail-compare"
+reason = "tril op family comparison failure"
+tracking = "#311"
+
+[test_tril_square]
+status = "pass"
+
+[test_tril_square_neg]
+status = "fail-compare"
+reason = "tril op family comparison failure"
+tracking = "#311"
+
+[test_tril_zero]
+status = "pass"
+
+[test_triu]
+status = "pass"
+
+[test_triu_neg]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_one_row]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_out_neg_out]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_out_pos]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_pos]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_square]
+status = "pass"
+
+[test_triu_square_neg]
+status = "fail-compare"
+reason = "triu op family comparison failure"
+tracking = "#311"
+
+[test_triu_zero]
+status = "pass"
+
+[test_unique_length_1]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unique_not_sorted_without_axis]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unique_sorted_with_axis]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unique_sorted_with_axis_3d]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unique_sorted_with_negative_axis]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unique_sorted_without_axis]
+status = "skip-codegen"
+reason = "Invalid type inference: Node 'unique1' output 'unique1_out1' has rank-0 tensor. Rank-0 tensors should be Scalar type instead."
+
+[test_unsqueeze_axis_0]
+status = "pass"
+
+[test_unsqueeze_axis_1]
+status = "pass"
+
+[test_unsqueeze_axis_2]
+status = "pass"
+
+[test_unsqueeze_negative_axes]
+status = "pass"
+
+[test_unsqueeze_three_axes]
+status = "pass"
+
+[test_unsqueeze_two_axes]
+status = "pass"
+
+[test_unsqueeze_unsorted_axes]
+status = "pass"
+
+[test_upsample_nearest]
+status = "pass"
+
+[test_where_example]
+status = "pass"
+
+[test_where_long_example]
+status = "pass"
+
+[test_wrap_pad]
+status = "skip-codegen"
+reason = "Config extraction failed: InvalidAttribute { name: \"mode\", reason: \"Invalid pad mode: wrap\" }"
+
+[test_xor2d]
+status = "pass"
+
+[test_xor3d]
+status = "pass"
+
+[test_xor4d]
+status = "pass"
+
+[test_xor_bcast3v1d]
+status = "pass"
+
+[test_xor_bcast3v2d]
+status = "pass"
+
+[test_xor_bcast4v2d]
+status = "pass"
+
+[test_xor_bcast4v3d]
+status = "pass"
+
+[test_xor_bcast4v4d]
+status = "pass"
+

@@ -1,0 +1,150 @@
+//! Placeholder node types for unsupported/unimplemented ONNX operations
+//!
+//! These operations are part of the ONNX spec but don't have full implementations yet.
+//! They are defined here as placeholders to maintain type safety and allow the graph
+//! to be parsed even when it contains unsupported operations.
+
+use crate::ir::{Argument, Node, RawNode};
+use crate::processor::{
+    InputSpec, NodeProcessor, NodeSpec, OutputPreferences, OutputSpec, ProcessError,
+};
+
+/// Generic placeholder for unsupported operations
+macro_rules! define_placeholder_node {
+    ($($name:ident),* $(,)?) => {
+        $(
+            #[derive(Debug, Clone)]
+            pub struct $name {
+                pub name: String,
+                pub inputs: Vec<Argument>,
+                pub outputs: Vec<Argument>,
+            }
+
+            impl ::core::fmt::Display for $name {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    let type_name = stringify!($name);
+                    let op_name = type_name.strip_suffix("Node").unwrap_or(type_name);
+                    write!(f, "{} {:?}\n", op_name, self.name)?;
+                    write!(f, "  Inputs:\n")?;
+                    for arg in &self.inputs {
+                        write!(f, "    {arg}\n")?;
+                    }
+                    write!(f, "  Outputs:\n")?;
+                    for arg in &self.outputs {
+                        write!(f, "    {arg}\n")?;
+                    }
+                    Ok(())
+                }
+            }
+        )*
+    };
+}
+
+define_placeholder_node! {
+    AffineGridNode,
+    AveragePoolNode,
+    CenterCropPadNode,
+    CompressNode,
+    ConcatFromSequenceNode,
+    ConvNode,
+    ConvIntegerNode,
+    ConvTransposeNode,
+
+    DequantizeLinearNode,
+    GlobalMaxPoolNode,
+    HardmaxNode,
+    ImNode,
+    ImageDecoderNode,
+    LpPoolNode,
+    MaxPoolNode,
+    MaxRoiPoolNode,
+    MaxUnpoolNode,
+    MultinomialNode,
+    NegativeLogLikelihoodLossNode,
+    NonMaxSuppressionNode,
+    OptionalNode,
+    OptionalGetElementNode,
+    OptionalHasElementNode,
+    QLinearConvNode,
+    QuantizeLinearNode,
+    RMSNormalizationNode,
+    RegexFullMatchNode,
+    ReverseSequenceNode,
+    RoiAlignNode,
+    RotaryEmbeddingNode,
+    ScatterNode,
+    SequenceAtNode,
+    SequenceConstructNode,
+    SequenceEmptyNode,
+    SequenceEraseNode,
+    SequenceInsertNode,
+    SequenceLengthNode,
+    SequenceMapNode,
+    ShrinkNode,
+    SoftmaxCrossEntropyLossNode,
+    SplitToSequenceNode,
+    StringConcatNode,
+    StringNormalizerNode,
+    StringSplitNode,
+    SwishNode,
+    TensorScatterNode,
+    TfIdfVectorizerNode,
+    UniqueNode,
+}
+
+/// Generic processor for unsupported operations
+///
+/// This processor creates placeholder nodes for operations that don't have full implementations.
+/// It performs basic input/output validation but doesn't extract any configuration.
+pub(crate) struct UnsupportedProcessor;
+
+impl NodeProcessor for UnsupportedProcessor {
+    type Config = ();
+
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            min_opset: 1,
+            max_opset: None,
+            // Accept any number of inputs/outputs
+            inputs: InputSpec::AtLeast(0),
+            outputs: OutputSpec::Range(0, usize::MAX),
+        }
+    }
+
+    fn infer_types(
+        &self,
+        _node: &mut RawNode,
+        _opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // Unsupported nodes keep whatever types were provided in the ONNX file.
+        Ok(())
+    }
+
+    fn extract_config(&self, _node: &RawNode, _opset: usize) -> Result<Self::Config, ProcessError> {
+        Ok(())
+    }
+
+    fn build_node(&self, builder: RawNode, _opset: usize) -> Node {
+        use crate::ir::NodeType;
+
+        match builder.node_type {
+            NodeType::GlobalMaxPool => Node::GlobalMaxPool(GlobalMaxPoolNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            NodeType::Scatter => Node::Scatter(ScatterNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            NodeType::Unique => Node::Unique(UniqueNode {
+                name: builder.name,
+                inputs: builder.inputs,
+                outputs: builder.outputs,
+            }),
+            _ => panic!("Unsupported node type: {:?}", builder.node_type),
+        }
+    }
+}

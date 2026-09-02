@@ -1,0 +1,354 @@
+//! # Linear
+//!
+//! Linear transformation: Y = X * W^T + b
+//!
+//! **Note**: This is a Burn-specific node type created by fusing ONNX Gemm or MatMul+Add operations.
+//! See the node_conversion phase where Gemm (with alpha=1, beta=1, transB=1) is converted to Linear,
+//! and MatMul followed by Add is fused into Linear.
+//!
+//! **Weight Layout**: The weight tensor layout depends on the source operation:
+//! - **Gemm-sourced** (transB=1): Weight is in `[out_features, in_features]` format.
+//!   The `transpose_weight` config flag is set to `true`.
+//! - **MatMul-sourced**: Weight is already in `[in_features, out_features]` format.
+//!   The `transpose_weight` config flag is set to `false`.
+//!
+//! The burn-onnx layer reads the `transpose_weight` flag and transposes the weight
+//! tensor only when needed during code generation.
+//!
+//! **Related ONNX Specs**:
+//! - Gemm: <https://onnx.ai/onnx/operators/onnx__Gemm.html>
+//! - MatMul: <https://onnx.ai/onnx/operators/onnx__MatMul.html>
+//!
+//! ## Missing Test Coverage
+//! - TODO: No test for Linear without bias (2 inputs only) - Optional bias not tested
+//! - TODO: No test validating weight tensor must be 2D - 1D or 3D+ weights should be rejected
+//! - TODO: No test for input rank validation - Spec requires specific input dimensions for matrix multiplication
+//! - TODO: No test for dtype mismatch between inputs - All inputs should have same dtype
+//! - TODO: No test for zero-size dimensions - Edge case for empty matrices
+//! - TODO: Test uses sum verification instead of exact values - Could miss subtle bugs in weight application
+
+use derive_new::new;
+use onnx_ir_derive::NodeBuilder;
+
+use crate::ir::{ArgType, Argument, AttributeValue, Node, RawNode, TensorType};
+use crate::processor::{
+    InputSpec, NodeProcessor, NodeSpec, OutputPreferences, OutputSpec, ProcessError,
+};
+
+/// Configuration for Linear operations
+#[derive(Debug, Clone, new)]
+pub struct LinearConfig {
+    /// Whether weight needs transposition for Burn's expected layout.
+    /// - true: Weight is in ONNX Gemm layout [out_features, in_features] (from Gemm with transB=1)
+    /// - false: Weight is already in [in_features, out_features] format (from MatMul)
+    pub transpose_weight: bool,
+}
+
+/// Node representation for Linear operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct LinearNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+    pub config: LinearConfig,
+}
+
+pub(crate) struct LinearProcessor;
+
+impl NodeProcessor for LinearProcessor {
+    type Config = LinearConfig;
+
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            min_opset: 1,
+            max_opset: None,
+            inputs: InputSpec::AtLeast(2),
+            outputs: OutputSpec::Exact(1),
+        }
+    }
+
+    fn lift_constants(&self, node: &mut RawNode, _opset: usize) -> Result<(), ProcessError> {
+        // Lift weight (input 1) and bias (input 2) if present
+        if node.inputs.len() > 1 && node.inputs[1].is_constant() {
+            node.inputs[1].to_static()?;
+        }
+        if node.inputs.len() > 2 && node.inputs[2].is_constant() {
+            node.inputs[2].to_static()?;
+        }
+
+        Ok(())
+    }
+
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        _opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // TODO: Validate weight tensor (input 1) is exactly 2D - Higher or lower rank weights are invalid - burn/crates/onnx-ir/src/node/linear.rs:86
+        // TODO: Validate all inputs have compatible dtypes - Type mismatch would cause runtime errors - burn/crates/onnx-ir/src/node/linear.rs:86
+        // TODO: Validate input rank is compatible for matrix multiplication - At least 2D required - burn/crates/onnx-ir/src/node/linear.rs:86
+
+        // Validate that only expected attributes are present
+        // Linear accepts only transpose_weight (internal attribute set by node_conversion)
+        for key in node.attrs.keys() {
+            if key != "transpose_weight" {
+                return Err(ProcessError::InvalidAttribute {
+                    name: key.clone(),
+                    reason: format!(
+                        "Linear only accepts 'transpose_weight' attribute, found: {}",
+                        key
+                    ),
+                });
+            }
+        }
+
+        let tensor = match &node.inputs[0].ty {
+            ArgType::Tensor(tensor) => tensor,
+            _ => {
+                return Err(ProcessError::TypeMismatch {
+                    expected: "Tensor".to_string(),
+                    actual: format!("{:?}", node.inputs[0].ty),
+                });
+            }
+        };
+
+        // Compute output static_shape: same as input but last dim = out_features
+        let static_shape = {
+            let transpose_weight = node
+                .attrs
+                .get("transpose_weight")
+                .map(|v| matches!(v, AttributeValue::Int64(1)))
+                .unwrap_or(false);
+            let out_features = node.inputs[1]
+                .value()
+                .and_then(|data| {
+                    let idx = if transpose_weight { 0 } else { 1 };
+                    data.shape.get(idx).copied()
+                })
+                .or_else(|| match &node.inputs[1].ty {
+                    ArgType::Tensor(weight) => weight.static_shape.as_ref().and_then(|ws| {
+                        let idx = if transpose_weight { 0 } else { 1 };
+                        ws.get(idx).copied().flatten()
+                    }),
+                    _ => None,
+                });
+            let mut shape: Vec<Option<usize>> = tensor
+                .static_shape
+                .clone()
+                .unwrap_or_else(|| vec![None; tensor.rank]);
+            if let Some(last) = shape.last_mut() {
+                *last = out_features;
+            }
+            Some(shape)
+        };
+
+        node.outputs[0].ty = ArgType::Tensor(TensorType {
+            dtype: tensor.dtype,
+            rank: tensor.rank,
+            static_shape,
+        });
+
+        Ok(())
+    }
+
+    fn extract_config(&self, node: &RawNode, _opset: usize) -> Result<Self::Config, ProcessError> {
+        use crate::ir::AttributeValue;
+
+        // Check if weight needs transposition (set by node_conversion phase)
+        // - Gemm with transB=1 → transpose_weight=true (weight is [out, in])
+        // - MatMul → transpose_weight=false (weight is [in, out])
+        let transpose_weight = node
+            .attrs
+            .get("transpose_weight")
+            .map(|v| matches!(v, AttributeValue::Int64(1)))
+            .unwrap_or(false);
+
+        Ok(LinearConfig::new(transpose_weight))
+    }
+
+    fn build_node(&self, builder: RawNode, opset: usize) -> Node {
+        let config = self
+            .extract_config(&builder, opset)
+            .expect("Config extraction failed");
+
+        Node::Linear(LinearNode {
+            name: builder.name,
+            inputs: builder.inputs,
+            outputs: builder.outputs,
+            config,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::NodeType;
+    use crate::node::test_utils::TestNodeBuilder;
+
+    /// Create a test node simulating Gemm->Linear conversion
+    /// Weight is in ONNX Gemm layout [out_features, in_features] with transpose_weight=true
+    fn create_gemm_linear_node(has_bias: bool, weight_dims: Vec<usize>) -> TestNodeBuilder {
+        // Create weight tensor data
+        let weight_data = vec![0.0; weight_dims.iter().product()]; // Not important for the test
+
+        // Start building the node with input and weight
+        // weight_dims is in Gemm format: [out_features, in_features]
+        let mut builder = TestNodeBuilder::new(NodeType::Linear, "test_linear")
+            .input_tensor_f32("input", 2, None)
+            .input_tensor_f32_data("weight", weight_data, weight_dims.clone())
+            .output_tensor_f32("output", 2, None)
+            .attr_int("transpose_weight", 1); // Gemm-sourced
+
+        // Add bias if needed - bias size equals out_features (weight_dims[0])
+        if has_bias {
+            let bias_data = vec![0.0; weight_dims[0]];
+            builder = builder.input_tensor_f32_data("bias", bias_data, vec![weight_dims[0]]);
+        }
+
+        builder
+    }
+
+    /// Create a test node simulating MatMul->Linear conversion
+    /// Weight is in MatMul layout [in_features, out_features] with transpose_weight=false
+    fn create_matmul_linear_node(has_bias: bool, weight_dims: Vec<usize>) -> TestNodeBuilder {
+        // Create weight tensor data
+        let weight_data = vec![0.0; weight_dims.iter().product()]; // Not important for the test
+
+        // Start building the node with input and weight
+        // weight_dims is in MatMul format: [in_features, out_features]
+        let mut builder = TestNodeBuilder::new(NodeType::Linear, "test_linear")
+            .input_tensor_f32("input", 2, None)
+            .input_tensor_f32_data("weight", weight_data, weight_dims.clone())
+            .output_tensor_f32("output", 2, None);
+        // No transpose_weight attribute means MatMul-sourced (transpose_weight=false)
+
+        // Add bias if needed - bias size equals out_features (weight_dims[1] for MatMul)
+        if has_bias {
+            let bias_data = vec![0.0; weight_dims[1]];
+            builder = builder.input_tensor_f32_data("bias", bias_data, vec![weight_dims[1]]);
+        }
+
+        builder
+    }
+
+    #[test]
+    fn test_linear_config_gemm_source() {
+        // Gemm layout: weight shape [10, 5] means [out_features=10, in_features=5]
+        let node = create_gemm_linear_node(false, vec![10, 5]).process(LinearProcessor, 16);
+        let processor = LinearProcessor;
+        let config = processor.extract_config(&node, 16).unwrap();
+
+        assert!(config.transpose_weight);
+    }
+
+    #[test]
+    fn test_linear_config_matmul_source() {
+        // MatMul layout: weight shape [5, 10] means [in_features=5, out_features=10]
+        let node = create_matmul_linear_node(false, vec![5, 10]).process(LinearProcessor, 16);
+        let processor = LinearProcessor;
+        let config = processor.extract_config(&node, 16).unwrap();
+
+        assert!(!config.transpose_weight);
+    }
+
+    #[test]
+    fn test_linear_config_missing_weight() {
+        let mut node = create_matmul_linear_node(false, vec![10, 5]).build_with_graph_data(16);
+        node.inputs.remove(1);
+
+        let processor = LinearProcessor;
+        let spec = processor.spec();
+        let result = crate::processor::validate_node_spec(&node, 16, &spec);
+        assert!(matches!(
+            result,
+            Err(ProcessError::InvalidInputCount { .. })
+        ));
+    }
+
+    #[test]
+    fn test_linear_static_shape_gemm() {
+        // Gemm: weight [out=10, in=5], input has static shape [batch=2, in=5]
+        let mut node = TestNodeBuilder::new(NodeType::Linear, "test_linear")
+            .input_tensor_f32("input", 2, Some(vec![2, 5]))
+            .input_tensor_f32_data("weight", vec![0.0; 50], vec![10, 5])
+            .output_tensor_f32("output", 2, None)
+            .attr_int("transpose_weight", 1)
+            .build_with_graph_data(16);
+
+        let processor = LinearProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.static_shape, Some(vec![Some(2), Some(10)]));
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_linear_static_shape_matmul() {
+        // MatMul: weight [in=5, out=10], input has static shape [batch=2, in=5]
+        let mut node = TestNodeBuilder::new(NodeType::Linear, "test_linear")
+            .input_tensor_f32("input", 2, Some(vec![2, 5]))
+            .input_tensor_f32_data("weight", vec![0.0; 50], vec![5, 10])
+            .output_tensor_f32("output", 2, None)
+            .build_with_graph_data(16);
+
+        let processor = LinearProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.static_shape, Some(vec![Some(2), Some(10)]));
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_linear_no_input_static_shape_still_infers_out_features() {
+        // No input static shape -> output still has out_features from weight
+        let node = create_gemm_linear_node(false, vec![10, 5]).process(LinearProcessor, 16);
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.static_shape, Some(vec![None, Some(10)]));
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_linear_partial_static_shape() {
+        // Input has partial static shape (batch unknown)
+        let mut node = TestNodeBuilder::new(NodeType::Linear, "test_linear")
+            .add_input(
+                "input",
+                ArgType::Tensor(TensorType {
+                    dtype: crate::ir::DType::F32,
+                    rank: 2,
+                    static_shape: Some(vec![None, Some(5)]),
+                }),
+            )
+            .input_tensor_f32_data("weight", vec![0.0; 50], vec![10, 5])
+            .output_tensor_f32("output", 2, None)
+            .attr_int("transpose_weight", 1)
+            .build_with_graph_data(16);
+
+        let processor = LinearProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(t) => {
+                assert_eq!(t.static_shape, Some(vec![None, Some(10)]));
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+}

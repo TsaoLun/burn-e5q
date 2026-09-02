@@ -1,0 +1,818 @@
+use burn_onnx::ModelGen;
+use burn_onnx::ext::proc_macro2::TokenStream;
+use burn_onnx::ext::{
+    ArgType, CodegenContext, CustomNode, CustomOp, Imports, Node, NodeType, OpOverride,
+    ProcessError, arg_to_ident, quote::quote,
+};
+
+fn main() {
+    // Re-run this build script if the onnx-tests directory changes.
+    println!("cargo:rerun-if-changed=tests");
+
+    // Add onnx models (unsimplified, used by existing tests).
+    let mut model_gen = ModelGen::new();
+    model_gen.simplify(false);
+    add_all_inputs(&mut model_gen);
+    model_gen.out_dir("model/").run_from_script();
+
+    // Custom (non-built-in) op models: need registered CustomOp hooks.
+    let mut custom = ModelGen::new();
+    custom
+        .simplify(false)
+        .input("tests/custom_ops/custom_ops.onnx")
+        .register_custom_op(ScaleShiftOp)
+        .register_custom_op(AddWindowOp)
+        .register_custom_op(MyIdentityOp)
+        .register_op_override(ReluOverride)
+        .out_dir("model/")
+        .run_from_script();
+
+    // Generate simplified models for comparison testing.
+    let mut simplified = ModelGen::new();
+    simplified.simplify(true);
+    add_simplify_inputs(&mut simplified);
+    simplified.out_dir("model_simplified/").run_from_script();
+
+    // Generate unsimplified models in a separate dir for comparison testing.
+    let mut unsimplified = ModelGen::new();
+    unsimplified.simplify(false);
+    add_simplify_inputs(&mut unsimplified);
+    unsimplified
+        .out_dir("model_unsimplified/")
+        .run_from_script();
+}
+
+fn add_all_inputs(model_gen: &mut ModelGen) {
+    model_gen
+        .input("tests/abs/abs.onnx")
+        .input("tests/acos/acos.onnx")
+        .input("tests/acosh/acosh.onnx")
+        .input("tests/add/add.onnx")
+        .input("tests/asin/asin.onnx")
+        .input("tests/asinh/asinh.onnx")
+        .input("tests/atan/atan.onnx")
+        .input("tests/atanh/atanh.onnx")
+        .input("tests/add/add_shape.onnx")
+        .input("tests/add/add_broadcast.onnx")
+        .input("tests/initializer_to_const/initializer_to_const.onnx")
+        .input("tests/and/and.onnx")
+        .input("tests/and/and_broadcast.onnx")
+        .input("tests/and/and_scalar.onnx")
+        .input("tests/and/and_scalar_tensor.onnx")
+        .input("tests/add/add_int.onnx")
+        .input("tests/add/add_shape_tensor.onnx")
+        .input("tests/add/add_argmax_with_shape.onnx")
+        .input("tests/argmax/argmax.onnx")
+        .input("tests/argmax/argmax_both_keepdims.onnx")
+        .input("tests/argmax/argmax_1d.onnx")
+        .input("tests/argmax/argmax_select_last_index.onnx")
+        .input("tests/argmin/argmin.onnx")
+        .input("tests/argmin/argmin_both_keepdims.onnx")
+        .input("tests/argmin/argmin_1d.onnx")
+        .input("tests/argmin/argmin_select_last_index.onnx")
+        .input("tests/attention/attention_4d.onnx")
+        .input("tests/attention/attention_3d.onnx")
+        .input("tests/attention/attention_attn_mask_bool.onnx")
+        .input("tests/attention/attention_attn_mask_int.onnx")
+        .input("tests/attention/attention_attn_mask_float.onnx")
+        .input("tests/attention/attention_softcap.onnx")
+        .input("tests/attention/attention_cache.onnx")
+        .input("tests/attention/attention_custom_scale.onnx")
+        .input("tests/attention/attention_is_causal.onnx")
+        .input("tests/attention/attention_qk_output_0.onnx")
+        .input("tests/attention/attention_qk_output_1.onnx")
+        .input("tests/attention/attention_qk_output_2.onnx")
+        .input("tests/attention/attention_qk_output_3.onnx")
+        .input("tests/avg_pool1d/avg_pool1d.onnx")
+        .input("tests/avg_pool1d_ceil_mode/avg_pool1d_ceil_mode.onnx")
+        .input("tests/avg_pool2d/avg_pool2d.onnx")
+        .input("tests/avg_pool2d_ceil_mode/avg_pool2d_ceil_mode.onnx")
+        .input("tests/avg_pool/avg_pool1d_asymmetric_padding.onnx")
+        .input("tests/avg_pool/avg_pool2d_asymmetric_padding.onnx")
+        .input("tests/avg_pool/avg_pool2d_same_upper_dynamic.onnx")
+        .input("tests/lp_pool1d/lp_pool1d.onnx")
+        .input("tests/lp_pool2d/lp_pool2d.onnx")
+        .input("tests/batch_norm/batch_norm.onnx")
+        .input("tests/batch_norm/batch_norm_runtime.onnx")
+        .input("tests/batch_norm/batch_norm_partial_constant.onnx")
+        .input("tests/bitshift/bitshift_left.onnx")
+        .input("tests/bitshift/bitshift_left_scalar.onnx")
+        .input("tests/bitshift/scalar_bitshift_left.onnx")
+        .input("tests/bitshift/scalar_bitshift_left_scalar.onnx")
+        .input("tests/bitshift/bitshift_right.onnx")
+        .input("tests/bitshift/bitshift_right_scalar.onnx")
+        .input("tests/bitshift/scalar_bitshift_right.onnx")
+        .input("tests/bitshift/scalar_bitshift_right_scalar.onnx")
+        .input("tests/bitwise_and/bitwise_and.onnx")
+        .input("tests/bitwise_and/bitwise_and_scalar.onnx")
+        .input("tests/bitwise_and/scalar_bitwise_and.onnx")
+        .input("tests/bitwise_and/scalar_bitwise_and_scalar.onnx")
+        .input("tests/bitwise_not/bitwise_not.onnx")
+        .input("tests/bitwise_or/bitwise_or.onnx")
+        .input("tests/bitwise_or/bitwise_or_scalar.onnx")
+        .input("tests/bitwise_or/scalar_bitwise_or.onnx")
+        .input("tests/bitwise_or/scalar_bitwise_or_scalar.onnx")
+        .input("tests/bitwise_xor/bitwise_xor.onnx")
+        .input("tests/bitwise_xor/bitwise_xor_scalar.onnx")
+        .input("tests/bitwise_xor/scalar_bitwise_xor.onnx")
+        .input("tests/bitwise_xor/scalar_bitwise_xor_scalar.onnx")
+        .input("tests/bernoulli/bernoulli.onnx")
+        .input("tests/cast/cast.onnx")
+        .input("tests/cast/cast_shape.onnx")
+        .input("tests/cast/cast_shape_to_float.onnx")
+        .input("tests/cast/cast_shape_to_bool.onnx")
+        .input("tests/cast_like/cast_like.onnx")
+        .input("tests/ceil/ceil.onnx")
+        .input("tests/celu/celu.onnx")
+        .input("tests/clip/clip.onnx")
+        .input("tests/concat/concat.onnx")
+        .input("tests/concat/concat_shape.onnx")
+        .input("tests/concat/concat_shape_with_constant.onnx")
+        .input("tests/concat/concat_shape_with_tensor.onnx")
+        .input("tests/concat/concat_mixed_single_element.onnx")
+        .input("tests/concat/concat_mixed_three_elements.onnx")
+        .input("tests/concat/concat_multiple_mixed.onnx")
+        .input("tests/concat/concat_with_constants.onnx")
+        .input("tests/concat/concat_scalar_direct.onnx")
+        .input("tests/concat/concat_scalar_from_gather.onnx")
+        .input("tests/constant/constant_f32.onnx")
+        .input("tests/constant/constant_f64.onnx")
+        .input("tests/constant/constant_i32.onnx")
+        .input("tests/constant/constant_i64.onnx")
+        .input("tests/constant/constant_bool.onnx")
+        .input("tests/constant/constant_shape.onnx")
+        .input("tests/constant/constant_tensor_f32.onnx")
+        .input("tests/constant/constant_tensor_i32.onnx")
+        .input("tests/constant/constant_tensor_bool.onnx")
+        .input("tests/constant/constant_empty_tensor_f32.onnx")
+        .input("tests/constant/rank_inference_propagation.onnx")
+        .input("tests/constant/shape_binary_ops_with_constant.onnx")
+        .input("tests/constant_of_shape/constant_of_shape.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_full_like.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_scalar.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_scalar_custom_value.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_tensor.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_shape_optimization.onnx")
+        .input("tests/constant_of_shape/constant_of_shape_with_constant_input.onnx")
+        .input("tests/constant_lifting_multiple/constant_lifting_multiple.onnx")
+        .input("tests/constant_lifting_multiple/constant_reused.onnx")
+        .input("tests/conv1d/conv1d.onnx")
+        .input("tests/conv2d/conv2d.onnx")
+        .input("tests/conv3d/conv3d.onnx")
+        .input("tests/conv/conv1d_asymmetric_padding.onnx")
+        .input("tests/conv/conv2d_asymmetric_padding.onnx")
+        .input("tests/conv/conv1d_same_upper_dynamic.onnx")
+        .input("tests/conv/conv2d_same_upper_dynamic.onnx")
+        .input("tests/conv_transpose1d/conv_transpose1d.onnx")
+        .input("tests/conv_transpose2d/conv_transpose2d.onnx")
+        .input("tests/conv_transpose3d/conv_transpose3d.onnx")
+        .input("tests/cos/cos.onnx")
+        .input("tests/cosh/cosh.onnx")
+        .input("tests/cumsum/cumsum.onnx")
+        .input("tests/cumsum/cumsum_exclusive.onnx")
+        .input("tests/cumsum/cumsum_reverse.onnx")
+        .input("tests/cumsum/cumsum_exclusive_reverse.onnx")
+        .input("tests/cumsum/cumsum_2d.onnx")
+        .input("tests/cumsum/cumsum_runtime_axis.onnx")
+        .input("tests/cumsum/cumsum_single_element.onnx")
+        .input("tests/cumsum/cumsum_exclusive_single.onnx")
+        .input("tests/deform_conv/deform_conv.onnx")
+        .input("tests/deform_conv/deform_conv_bias.onnx")
+        .input("tests/deform_conv/deform_conv_mask.onnx")
+        .input("tests/dequantize_linear/dequantize_linear.onnx")
+        .input("tests/dequantize_linear/dequantize_linear_axis.onnx")
+        .input("tests/depth_to_space/depth_to_space_dcr.onnx")
+        .input("tests/depth_to_space/depth_to_space_crd.onnx")
+        .input("tests/det/det.onnx")
+        .input("tests/det/det_batched.onnx")
+        .input("tests/dft/dft_onesided.onnx")
+        .input("tests/dft/dft_full.onnx")
+        .input("tests/blackman_window/blackman_window.onnx")
+        .input("tests/blackman_window/blackman_window_symmetric.onnx")
+        .input("tests/blackman_window/blackman_window_runtime.onnx")
+        .input("tests/hamming_window/hamming_window.onnx")
+        .input("tests/hamming_window/hamming_window_symmetric.onnx")
+        .input("tests/hamming_window/hamming_window_runtime.onnx")
+        .input("tests/stft/stft_basic.onnx")
+        .input("tests/stft/stft_full.onnx")
+        .input("tests/stft/stft_non_pow2.onnx")
+        .input("tests/stft/stft_with_window.onnx")
+        .input("tests/hann_window/hann_window.onnx")
+        .input("tests/mel_weight_matrix/mel_weight_matrix_constants.onnx")
+        .input("tests/mel_weight_matrix/mel_weight_matrix_runtime.onnx")
+        .input("tests/mel_weight_matrix/mel_weight_matrix_shaped.onnx")
+        .input("tests/hann_window/hann_window_symmetric.onnx")
+        .input("tests/hann_window/hann_window_runtime.onnx")
+        .input("tests/col2im/col2im_basic.onnx")
+        .input("tests/col2im/col2im_complex.onnx")
+        .input("tests/div/div.onnx")
+        .input("tests/div/div_shape.onnx")
+        .input("tests/div/div_shape_tensor.onnx")
+        .input("tests/div/div_broadcast.onnx")
+        .input("tests/mod/modulo.onnx")
+        .input("tests/mod/mod_scalar.onnx")
+        .input("tests/mod/mod_remainder.onnx")
+        .input("tests/mod/mod_fmod.onnx")
+        .input("tests/mod/mod_broadcast_fixed.onnx")
+        .input("tests/mod/mod_broadcast_remainder_fixed.onnx")
+        .input("tests/mod/mod_shape.onnx")
+        .input("tests/dropout/dropout.onnx")
+        .input("tests/elu/elu.onnx")
+        .input("tests/empty_graph/empty_graph_scalar.onnx")
+        .input("tests/empty_graph/empty_graph_scalar_int.onnx")
+        .input("tests/empty_graph/empty_graph_shape.onnx")
+        .input("tests/empty_graph/empty_graph_tensor.onnx")
+        .input("tests/empty_graph/empty_graph_multiple.onnx")
+        .input("tests/equal/equal.onnx")
+        .input("tests/equal/equal_shape.onnx")
+        .input("tests/equal/equal_two_shapes.onnx")
+        .input("tests/equal/equal_scalar.onnx")
+        .input("tests/erf/erf.onnx")
+        .input("tests/exp/exp.onnx")
+        .input("tests/expand/expand.onnx")
+        .input("tests/expand/expand_tensor.onnx")
+        .input("tests/expand/expand_scalar.onnx")
+        .input("tests/expand/expand_shape.onnx")
+        .input("tests/expand/expand_with_where_shape.onnx")
+        .input("tests/expand/expand_max_semantics.onnx")
+        .input("tests/expand/expand_dynamic_where.onnx")
+        .input("tests/expand/expand_shape_as_data.onnx")
+        .input("tests/eye_like/eye_like.onnx")
+        .input("tests/eye_like/eye_like_k1.onnx")
+        .input("tests/eye_like/eye_like_int.onnx")
+        .input("tests/eye_like/eye_like_k_minus1.onnx")
+        .input("tests/eye_like/eye_like_float64.onnx")
+        .input("tests/eye_like/eye_like_int32.onnx")
+        .input("tests/eye_like/eye_like_bool.onnx")
+        .input("tests/eye_like/eye_like_large_k.onnx")
+        .input("tests/eye_like/eye_like_1x1.onnx")
+        .input("tests/eye_like/eye_like_wide.onnx")
+        .input("tests/eye_like/eye_like_neg_large_k.onnx")
+        .input("tests/nonzero/nonzero_float32.onnx")
+        .input("tests/nonzero/nonzero_int64.onnx")
+        .input("tests/nonzero/nonzero_bool.onnx")
+        .input("tests/nonzero/nonzero_1d.onnx")
+        .input("tests/nonzero/nonzero_3d.onnx")
+        .input("tests/nonzero/nonzero_empty.onnx")
+        .input("tests/flatten/flatten.onnx")
+        .input("tests/flatten/flatten_2d.onnx")
+        .input("tests/flatten/flatten_rank1.onnx")
+        .input("tests/floor/floor.onnx")
+        .input("tests/gather/gather_1d_idx.onnx")
+        .input("tests/gather/gather_2d_idx.onnx")
+        .input("tests/gather/gather_scalar.onnx")
+        .input("tests/gather/gather_constant_2d_indices.onnx")
+        .input("tests/gather/gather_static_shape_indices.onnx")
+        .input("tests/gather/gather_shape.onnx")
+        .input("tests/gather/gather_shape_reorder.onnx")
+        .input("tests/gather/gather_with_shape_indices.onnx")
+        .input("tests/gather/gather_scalar_out.onnx")
+        .input("tests/gather/gather_scalar_input.onnx")
+        .input("tests/gather/gather_negative_idx.onnx")
+        .input("tests/gather_elements/gather_elements.onnx")
+        .input("tests/gather_elements/gather_elements_axis0.onnx")
+        .input("tests/gather_elements/gather_elements_3d.onnx")
+        .input("tests/gather_elements/gather_elements_negative_axis.onnx")
+        .input("tests/gathernd/gathernd.onnx")
+        .input("tests/gathernd/gathernd_partial.onnx")
+        .input("tests/gathernd/gathernd_3d.onnx")
+        .input("tests/gathernd/gathernd_batch1.onnx")
+        .input("tests/gathernd/gathernd_neg_idx.onnx")
+        .input("tests/gelu/gelu.onnx")
+        .input("tests/gemm/gemm.onnx")
+        .input("tests/gemm/gemm_non_unit_alpha_beta.onnx")
+        .input("tests/gemm/gemm_no_c.onnx")
+        .input("tests/global_avr_pool/global_avr_pool.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_default.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_l1.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_l2.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_l3.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_rank_4_l1.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_rank_4_l2.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_rank_4_l3.onnx")
+        .input("tests/global_lp_pool/global_lp_pool_opset1_fractional_p.onnx")
+        .input("tests/graph_multiple_output_tracking/graph_multiple_output_tracking.onnx")
+        .input("tests/greater/greater.onnx")
+        .input("tests/greater/greater_scalar.onnx")
+        .input("tests/greater/greater_broadcast.onnx")
+        .input("tests/greater_or_equal/greater_or_equal.onnx")
+        .input("tests/greater_or_equal/greater_or_equal_scalar.onnx")
+        .input("tests/greater_or_equal/greater_or_equal_broadcast.onnx")
+        .input("tests/grid_sample/grid_sample.onnx")
+        .input("tests/grid_sample/grid_sample_nearest.onnx")
+        .input("tests/group_norm/group_norm.onnx")
+        .input("tests/hard_sigmoid/hard_sigmoid.onnx")
+        .input("tests/hard_swish/hard_swish.onnx")
+        .input("tests/hardmax/hardmax.onnx")
+        .input("tests/identity/identity_constant.onnx")
+        .input("tests/identity/identity_passthrough.onnx")
+        .input("tests/identity/identity_chain.onnx")
+        .input("tests/identity/identity_only.onnx")
+        .input("tests/instance_norm1d/instance_norm1d.onnx")
+        .input("tests/instance_norm2d/instance_norm2d.onnx")
+        .input("tests/instance_norm3d/instance_norm3d.onnx")
+        .input("tests/is_inf/is_inf.onnx")
+        .input("tests/is_inf/is_inf_scalar.onnx")
+        .input("tests/is_inf/is_inf_neg_only.onnx")
+        .input("tests/is_inf/is_inf_pos_only.onnx")
+        .input("tests/is_inf/is_inf_none.onnx")
+        .input("tests/is_nan/is_nan.onnx")
+        .input("tests/is_nan/is_nan_scalar.onnx")
+        .input("tests/imputer/imputer.onnx")
+        .input("tests/imputer/imputer_per_feature.onnx")
+        .input("tests/imputer/imputer_int.onnx")
+        .input("tests/imputer/imputer_nan.onnx")
+        .input("tests/imputer/imputer_nan_default.onnx")
+        .input("tests/layer_norm/layer_norm.onnx")
+        .input("tests/layer_norm/layer_norm_no_bias.onnx")
+        .input("tests/layer_norm/layer_norm_custom_epsilon.onnx")
+        .input("tests/layer_norm/layer_norm_4d.onnx")
+        .input("tests/leaky_relu/leaky_relu.onnx")
+        .input("tests/less/less.onnx")
+        .input("tests/less/less_scalar.onnx")
+        .input("tests/svmregressor/svmregressor.onnx")
+        .input("tests/svmregressor/svmregressor_rbf.onnx")
+        .input("tests/svmregressor/svmregressor_poly.onnx")
+        .input("tests/svmregressor/svmregressor_sigmoid.onnx")
+        .input("tests/svmregressor/svmregressor_logistic.onnx")
+        .input("tests/svmregressor/svmregressor_softmax_zero.onnx")
+        .input("tests/less/less_broadcast.onnx")
+        .input("tests/less_or_equal/less_or_equal.onnx")
+        .input("tests/less_or_equal/less_or_equal_scalar.onnx")
+        .input("tests/less_or_equal/less_or_equal_broadcast.onnx")
+        .input("tests/linear/linear.onnx")
+        .input("tests/log/log.onnx")
+        .input("tests/lrn/lrn_default_size3.onnx")
+        .input("tests/lrn/lrn_custom_size3.onnx")
+        .input("tests/lrn/lrn_custom_size2.onnx")
+        .input("tests/gru/gru.onnx")
+        .input("tests/gru/gru_reverse.onnx")
+        .input("tests/gru/gru_with_initial_state.onnx")
+        .input("tests/gru/gru_bidirectional.onnx")
+        .input("tests/gru/gru_runtime_weights.onnx")
+        .input("tests/gru/gru_bidirectional_runtime_weights.onnx")
+        .input("tests/gru/gru_bidirectional_static_weights.onnx")
+        .input("tests/lstm/lstm.onnx")
+        .input("tests/lstm/lstm_bidirectional.onnx")
+        .input("tests/lstm/lstm_reverse.onnx")
+        .input("tests/lstm/lstm_with_initial_state.onnx")
+        .input("tests/lstm/lstm_runtime_weights.onnx")
+        .input("tests/log_softmax/log_softmax.onnx")
+        .input("tests/where_op/where_op.onnx")
+        .input("tests/where_op/where_op_broadcast.onnx")
+        .input("tests/where_op/where_op_scalar_x.onnx")
+        .input("tests/where_op/where_op_scalar_y.onnx")
+        .input("tests/where_op/where_op_all_scalar.onnx")
+        .input("tests/where_op/where_scalar_xy.onnx")
+        .input("tests/where_op/where_shape_all_shapes.onnx")
+        .input("tests/where_op/where_shape_scalar_cond.onnx")
+        .input("tests/where_op/where_shapes_from_inputs.onnx")
+        .input("tests/where_op/where_static_shape.onnx")
+        .input("tests/einsum/einsum.onnx")
+        .input("tests/einsum/einsum_outer_int.onnx")
+        .input("tests/einsum/einsum_scalar.onnx")
+        .input("tests/einsum/einsum_scalar_scalar.onnx")
+        .input("tests/einsum/einsum_shadow_rhs.onnx")
+        .input("tests/einsum/einsum_sam.onnx")
+        .input("tests/einsum/einsum_implicit.onnx")
+        .input("tests/einsum/einsum_reduction.onnx")
+        .input("tests/einsum/einsum_ellipsis.onnx")
+        .input("tests/matmul/matmul.onnx")
+        .input("tests/matmulinteger/matmulinteger.onnx")
+        .input("tests/matmulinteger/matmulinteger_ranks.onnx")
+        .input("tests/matmul/matmul_ranks.onnx")
+        .input("tests/matmul/matmul_scalar_add.onnx")
+        .input("tests/max/max.onnx")
+        .input("tests/max/max_broadcast.onnx")
+        .input("tests/maxpool1d/maxpool1d.onnx")
+        .input("tests/maxpool1d_ceil_mode/maxpool1d_ceil_mode.onnx")
+        .input("tests/maxpool2d/maxpool2d.onnx")
+        .input("tests/maxpool2d_ceil_mode/maxpool2d_ceil_mode.onnx")
+        .input("tests/maxpool/maxpool1d_asymmetric_padding.onnx")
+        .input("tests/maxpool/maxpool2d_asymmetric_padding.onnx")
+        .input("tests/maxpool/maxpool2d_same_upper_dynamic.onnx")
+        .input("tests/min/min.onnx")
+        .input("tests/min/min_broadcast.onnx")
+        .input("tests/mish/mish.onnx")
+        .input("tests/mean/mean.onnx")
+        .input("tests/lp_normalization/lp_normalization_default.onnx")
+        .input("tests/lp_normalization/lp_normalization_l1_axis1.onnx")
+        .input("tests/lp_normalization/lp_normalization_l2_axis0.onnx")
+        .input("tests/lp_normalization/lp_normalization_l2_negative_axis.onnx")
+        .input("tests/mean_variance_normalization/mean_variance_normalization_default_axes.onnx")
+        .input("tests/mean_variance_normalization/mean_variance_normalization_custom_axes.onnx")
+        .input("tests/mean_variance_normalization/mean_variance_normalization_all_axes.onnx")
+        .input("tests/mean_variance_normalization/mean_variance_normalization_negative_axes.onnx")
+        .input("tests/mul/mul.onnx")
+        .input("tests/mul/mul_shape.onnx")
+        .input("tests/mul/mul_shape_tensor.onnx")
+        .input("tests/mul/mul_broadcast.onnx")
+        .input("tests/neg/neg.onnx")
+        .input("tests/not/not.onnx")
+        .input("tests/one_hot/one_hot.onnx")
+        .input("tests/one_hot/one_hot_axis0.onnx")
+        .input("tests/one_hot/one_hot_float_values.onnx")
+        .input("tests/one_hot/one_hot_2d.onnx")
+        .input("tests/or/or.onnx")
+        .input("tests/or/or_scalar.onnx")
+        .input("tests/or/or_broadcast.onnx")
+        .input("tests/pad/pad.onnx")
+        .input("tests/pad/pad_reflect.onnx")
+        .input("tests/pad/pad_edge.onnx")
+        .input("tests/pad/pad_runtime_constant.onnx")
+        .input("tests/pad/pad_runtime_pads.onnx")
+        .input("tests/pad/pad_runtime_pads_axes.onnx")
+        .input("tests/pad/pad_runtime_pads_shape.onnx")
+        .input("tests/pad/pad_runtime_axes.onnx")
+        .input("tests/pad/pad_optional_constant_value.onnx")
+        .input("tests/pad/pad_ndim.onnx")
+        .input("tests/pow/pow.onnx")
+        .input("tests/pow/pow_int.onnx")
+        .input("tests/pow/pow_broadcast.onnx")
+        .input("tests/prelu/prelu.onnx")
+        .input("tests/prelu/prelu_with_channel_slope.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_scalar.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_vector.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_nd.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_u8_saturate.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_i8_saturate.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_opset_10.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_scalar_f16_scale.onnx")
+        .input("tests/qlinear_matmul/qlinear_matmul_vector_bf16_scale.onnx")
+        .input("tests/quantize_linear/quantize_linear.onnx")
+        .input("tests/quantize_linear/quantize_linear_axis.onnx")
+        .input("tests/random_normal/random_normal.onnx")
+        .input("tests/random_normal_like/random_normal_like.onnx")
+        .input("tests/random_uniform/random_uniform.onnx")
+        .input("tests/random_uniform_like/random_uniform_like.onnx")
+        .input("tests/range/range.onnx")
+        .input("tests/range/range_static.onnx")
+        .input("tests/range/range_mixed.onnx")
+        .input("tests/range/range_runtime.onnx")
+        .input("tests/range/range_negative_delta.onnx")
+        .input("tests/recip/recip.onnx")
+        .input("tests/reduce/reduce_max.onnx")
+        .input("tests/reduce/reduce_max_bool.onnx")
+        .input("tests/reduce/reduce_mean.onnx")
+        .input("tests/reduce/reduce_mean_partial_shape.onnx")
+        .input("tests/reduce/reduce_min.onnx")
+        .input("tests/reduce/reduce_min_bool.onnx")
+        .input("tests/reduce/reduce_prod.onnx")
+        .input("tests/reduce/reduce_sum.onnx")
+        .input("tests/reduce/reduce_sum_square.onnx")
+        .input("tests/reduce/reduce_l1.onnx")
+        .input("tests/reduce/reduce_l2.onnx")
+        .input("tests/reduce/reduce_log_sum.onnx")
+        .input("tests/reduce/reduce_log_sum_exp.onnx")
+        .input("tests/reduce/reduce_runtime_axes.onnx")
+        .input("tests/relu/relu.onnx")
+        .input("tests/reshape/reshape.onnx")
+        .input("tests/reshape/reshape_with_1d_tensor.onnx")
+        .input("tests/reshape/reshape_with_shape.onnx")
+        .input("tests/reshape/reshape_to_scalar.onnx")
+        .input("tests/reshape/reshape_3d_to_scalar.onnx")
+        .input("tests/reshape/reshape_shape_to_shape.onnx")
+        .input("tests/reshape/reshape_shape_with_neg.onnx")
+        .input("tests/reshape/reshape_shape_partial.onnx")
+        .input("tests/reshape/reshape_scalar_to_scalar.onnx")
+        .input("tests/resize/resize_with_sizes.onnx")
+        .input("tests/resize/resize_1d_linear_scale.onnx")
+        .input("tests/resize/resize_1d_nearest_scale.onnx")
+        .input("tests/resize/resize_2d_bicubic_scale.onnx")
+        .input("tests/resize/resize_2d_bilinear_scale.onnx")
+        .input("tests/resize/resize_2d_bilinear_half_pixel.onnx")
+        .input("tests/resize/resize_2d_nearest_scale.onnx")
+        .input("tests/resize/resize_with_shape.onnx")
+        .input("tests/resize/resize_with_sizes_tensor.onnx")
+        .input("tests/resize/resize_with_scales_tensor.onnx")
+        .input("tests/upsample/upsample_nearest_opset7.onnx")
+        .input("tests/upsample/upsample_nearest_opset9.onnx")
+        .input("tests/upsample/upsample_nearest_runtime_scales.onnx")
+        .input("tests/rnn/rnn.onnx")
+        .input("tests/rnn/rnn_bidirectional.onnx")
+        .input("tests/rnn/rnn_reverse.onnx")
+        .input("tests/rnn/rnn_with_initial_state.onnx")
+        .input("tests/rnn/rnn_runtime_weights.onnx")
+        .input("tests/round/round.onnx")
+        .input("tests/scaler/scaler.onnx")
+        .input("tests/scaler/scaler_per_feature_3d.onnx")
+        .input("tests/scaler/scaler_i64.onnx")
+        .input("tests/scaler/scaler_ml_domain_only.onnx")
+        .input("tests/shape/shape.onnx")
+        .input("tests/shape/shape_of_shape.onnx")
+        .input("tests/shape/shape_slice.onnx")
+        .input("tests/shape/shape_chain.onnx")
+        .input("tests/shrink/shrink.onnx")
+        .input("tests/sigmoid/sigmoid.onnx")
+        .input("tests/sign/sign.onnx")
+        .input("tests/sin/sin.onnx")
+        .input("tests/sinh/sinh.onnx")
+        .input("tests/size/size.onnx")
+        .input("tests/size/size_shape.onnx")
+        .input("tests/slice/slice.onnx")
+        .input("tests/slice/slice_shape.onnx")
+        .input("tests/slice/slice_scalar.onnx")
+        .input("tests/slice/slice_mixed.onnx")
+        .input("tests/slice/slice_shape_gather.onnx")
+        .input("tests/slice/slice_shape_runtime.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds_i32.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds_negative.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds_reshape.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds_concat.onnx")
+        .input("tests/slice/slice_shape_runtime_bounds_concat_reshape.onnx")
+        .input("tests/slice/slice_shape_multi.onnx")
+        .input("tests/slice/slice_shape_negative.onnx")
+        .input("tests/slice/slice_shape_negative_range.onnx")
+        .input("tests/slice/slice_1d_tensor.onnx")
+        .input("tests/slice/slice_shape_start_tensor_end.onnx")
+        .input("tests/slice/slice_tensor_start_shape_end.onnx")
+        .input("tests/slice/slice_tensor_to_split.onnx")
+        .input("tests/slice/slice_axes.onnx")
+        .input("tests/slice/slice_with_steps.onnx")
+        .input("tests/slice/slice_shape_with_steps.onnx")
+        .input("tests/slice/slice_empty.onnx")
+        .input("tests/slice/slice_min_sentinel.onnx")
+        .input("tests/slice/slice_reverse_dynamic.onnx")
+        .input("tests/slice/slice_reverse_steps.onnx")
+        .input("tests/slice/slice_shape_reverse.onnx")
+        .input("tests/selu/selu.onnx")
+        .input("tests/softmax/softmax.onnx")
+        .input("tests/softplus/softplus.onnx")
+        .input("tests/softsign/softsign.onnx")
+        .input("tests/thresholded_relu/thresholded_relu.onnx")
+        .input("tests/space_to_depth/space_to_depth.onnx")
+        .input("tests/sqrt/sqrt.onnx")
+        .input("tests/squeeze/squeeze_multiple.onnx")
+        .input("tests/squeeze/squeeze.onnx")
+        .input("tests/squeeze/squeeze_shape.onnx")
+        .input("tests/squeeze/squeeze_shape_noop.onnx")
+        .input("tests/squeeze/squeeze_scalar.onnx")
+        .input("tests/squeeze/squeeze_float.onnx")
+        .input("tests/squeeze/squeeze_tensor_to_scalar.onnx")
+        .input("tests/squeeze/squeeze_opset13_axes_input.onnx")
+        .input("tests/squeeze/squeeze_no_axes.onnx")
+        .input("tests/swish/swish.onnx")
+        .input("tests/sub/sub.onnx")
+        .input("tests/sub/sub_shape.onnx")
+        .input("tests/sub/sub_broadcast.onnx")
+        .input("tests/sub/sub_int.onnx")
+        .input("tests/sub/sub_shape_tensor.onnx")
+        .input("tests/sum/sum.onnx")
+        .input("tests/sum/sum_int.onnx")
+        .input("tests/tan/tan.onnx")
+        .input("tests/tanh/tanh.onnx")
+        .input("tests/tile/tile.onnx")
+        .input("tests/topk/topk.onnx")
+        .input("tests/topk/topk_axis0.onnx")
+        .input("tests/topk/topk_1d.onnx")
+        .input("tests/topk/topk_3d.onnx")
+        .input("tests/topk/topk_k_full.onnx")
+        .input("tests/topk/topk_negative_axis.onnx")
+        .input("tests/trilu/trilu_upper.onnx")
+        .input("tests/trilu/trilu_lower.onnx")
+        .input("tests/transpose/transpose.onnx")
+        .input("tests/unsqueeze/unsqueeze_runtime_axes.onnx")
+        .input("tests/unsqueeze/unsqueeze_like.onnx")
+        .input("tests/unsqueeze/unsqueeze_int_to_shape.onnx")
+        .input("tests/unsqueeze/unsqueeze_scalar_axes.onnx")
+        .input("tests/unsqueeze/unsqueeze_shape_input.onnx")
+        .input("tests/unsqueeze/squeeze_unsqueeze_roundtrip.onnx")
+        .input("tests/split/split.onnx")
+        .input("tests/split/split_uneven.onnx")
+        .input("tests/split/split_axis1.onnx")
+        .input("tests/xor/xor.onnx")
+        .input("tests/xor/xor_scalar.onnx")
+        .input("tests/xor/xor_broadcast.onnx")
+        // If operator tests
+        .input("tests/if_op/if_conv2d.onnx")
+        .input("tests/if_op/if_linear.onnx")
+        .input("tests/if_op/nested_if.onnx")
+        // Loop operator tests
+        .input("tests/loop/loop_simple.onnx")
+        .input("tests/loop/loop_dynamic_cond.onnx")
+        .input("tests/loop/loop_multi_deps.onnx")
+        .input("tests/loop/loop_nested.onnx")
+        .input("tests/loop/loop_scan_outputs.onnx")
+        // ScatterElements operator tests
+        .input("tests/scatter_elements/scatter_elements.onnx")
+        .input("tests/scatter_elements/scatter_elements_axis1.onnx")
+        .input("tests/scatter_elements/scatter_elements_add.onnx")
+        .input("tests/scatter_elements/scatter_elements_mul.onnx")
+        .input("tests/scatter_elements/scatter_elements_max.onnx")
+        .input("tests/scatter_elements/scatter_elements_min.onnx")
+        .input("tests/scatter_elements/scatter_elements_bool.onnx")
+        .input("tests/scatter_elements/scatter_elements_3d.onnx")
+        .input("tests/scatter_elements/scatter_elements_1d.onnx")
+        .input("tests/scatter_elements/scatter_elements_int.onnx")
+        // ScatterND operator tests
+        .input("tests/scatter_nd/scatter_nd.onnx")
+        .input("tests/scatter_nd/scatter_nd_2d.onnx")
+        .input("tests/scatter_nd/scatter_nd_add.onnx")
+        .input("tests/scatter_nd/scatter_nd_mul.onnx")
+        .input("tests/scatter_nd/scatter_nd_max.onnx")
+        .input("tests/scatter_nd/scatter_nd_min.onnx")
+        .input("tests/scatter_nd/scatter_nd_bool.onnx")
+        .input("tests/scatter_nd/scatter_nd_neg_idx.onnx")
+        // Scan operator tests
+        .input("tests/scan/scan_cumsum.onnx")
+        .input("tests/scan/scan_reverse.onnx")
+        .input("tests/scan/scan_multi_state.onnx")
+        .input("tests/scan/scan_axis1.onnx")
+        // Subgraph tests: nested control flow and outer-scope references
+        .input("tests/subgraph/nested_if_loop_if.onnx")
+        .input("tests/subgraph/nested_if_loop_if_scan.onnx")
+        .input("tests/subgraph/outer_scope_ref.onnx")
+        .input("tests/subgraph/outer_scope_multi_var.onnx")
+        .input("tests/subgraph/outer_scope_loop.onnx")
+        .input("tests/subgraph/outer_scope_scan.onnx")
+        .input("tests/subgraph/outer_scope_constant.onnx");
+}
+
+/// `test.custom::ScaleShift`: y = x * scale + shift (scale/shift are FLOAT attrs).
+///
+/// Exercises attribute access and hook-registered imports: the emitted call
+/// relies on `use crate::custom_ops::ops;` registered below.
+struct ScaleShiftOp;
+
+impl CustomOp for ScaleShiftOp {
+    fn op_type(&self) -> &str {
+        "ScaleShift"
+    }
+
+    fn domain(&self) -> &str {
+        "test.custom"
+    }
+
+    fn infer_output_types(&self, node: &CustomNode) -> Result<Vec<ArgType>, ProcessError> {
+        let input = node
+            .inputs
+            .first()
+            .ok_or_else(|| ProcessError::MissingInput("x".to_string()))?;
+        // Validate attributes here, where errors surface as friendly parse
+        // failures; forward() can then rely on them.
+        for attr in ["scale", "shift"] {
+            node.attrs
+                .get_f32(attr)
+                .ok_or_else(|| ProcessError::MissingAttribute(attr.to_string()))?;
+        }
+        Ok(vec![input.ty.clone()])
+    }
+
+    fn forward(
+        &self,
+        node: &CustomNode,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let input = ctx.arg(&node.inputs[0]);
+        let out = arg_to_ident(&node.outputs[0]);
+        let scale = node
+            .attrs
+            .get_f32("scale")
+            .ok_or_else(|| ProcessError::MissingAttribute("scale".to_string()))?;
+        let shift = node
+            .attrs
+            .get_f32("shift")
+            .ok_or_else(|| ProcessError::MissingAttribute("shift".to_string()))?;
+        Ok(quote! {
+            let #out = ops::scale_shift(#input, #scale, #shift);
+        })
+    }
+
+    fn register_imports(&self, imports: &mut Imports<'_>) {
+        imports.register("crate::custom_ops::ops");
+    }
+}
+
+/// `test.custom::AddWindow`: y = x + window (broadcast over rows).
+///
+/// The window is a constant initializer input, read at codegen time via
+/// `Argument::value()` and inlined into the generated call.
+struct AddWindowOp;
+
+impl CustomOp for AddWindowOp {
+    fn op_type(&self) -> &str {
+        "AddWindow"
+    }
+
+    fn domain(&self) -> &str {
+        "test.custom"
+    }
+
+    fn infer_output_types(&self, node: &CustomNode) -> Result<Vec<ArgType>, ProcessError> {
+        let input = node
+            .inputs
+            .first()
+            .ok_or_else(|| ProcessError::MissingInput("x".to_string()))?;
+        // Check presence AND dtype during inference so codegen never fails on
+        // a window the model declared with the wrong element type.
+        let window = node
+            .inputs
+            .get(1)
+            .and_then(|arg| arg.value())
+            .ok_or_else(|| {
+                ProcessError::Custom("AddWindow requires a constant window input".to_string())
+            })?;
+        window.try_into_vec::<f32>().map_err(|_| {
+            ProcessError::Custom("AddWindow window constant must be f32".to_string())
+        })?;
+        Ok(vec![input.ty.clone()])
+    }
+
+    fn forward(
+        &self,
+        node: &CustomNode,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let input = ctx.arg(&node.inputs[0]);
+        let out = arg_to_ident(&node.outputs[0]);
+        let window = node.inputs[1]
+            .value()
+            .ok_or_else(|| ProcessError::Custom("window constant missing".to_string()))?
+            .try_into_vec::<f32>()
+            .map_err(|_| ProcessError::Custom("window constant must be f32".to_string()))?;
+        Ok(quote! {
+            let #out = crate::custom_ops::ops::add_window(#input, &[#(#window),*], &self.device);
+        })
+    }
+}
+
+/// `MyIdentity` (default ONNX domain): unknown op_type, passes input through.
+struct MyIdentityOp;
+
+impl CustomOp for MyIdentityOp {
+    fn op_type(&self) -> &str {
+        "MyIdentity"
+    }
+
+    fn infer_output_types(&self, node: &CustomNode) -> Result<Vec<ArgType>, ProcessError> {
+        let input = node
+            .inputs
+            .first()
+            .ok_or_else(|| ProcessError::MissingInput("input".to_string()))?;
+        Ok(vec![input.ty.clone()])
+    }
+
+    fn forward(
+        &self,
+        node: &CustomNode,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let input = ctx.arg(&node.inputs[0]);
+        let out = arg_to_ident(&node.outputs[0]);
+        Ok(quote! {
+            let #out = #input;
+        })
+    }
+}
+
+/// Codegen override for the built-in Relu: reroutes to a user kernel.
+/// Type inference still comes from the built-in Relu processor.
+///
+/// `my_relu` deliberately deviates from relu (it adds 1.0) so the runtime
+/// test can prove the override was dispatched: with a faithful kernel the
+/// built-in codegen would produce identical numbers and a dispatch
+/// regression would be invisible.
+struct ReluOverride;
+
+impl OpOverride for ReluOverride {
+    fn target(&self) -> NodeType {
+        NodeType::Relu
+    }
+
+    fn forward(
+        &self,
+        node: &Node,
+        ctx: &mut CodegenContext<'_, '_>,
+    ) -> Result<TokenStream, ProcessError> {
+        let Node::Relu(relu) = node else {
+            return Err(ProcessError::Custom(
+                "ReluOverride received a non-Relu node".to_string(),
+            ));
+        };
+        let input = ctx.arg(&relu.inputs[0]);
+        let out = arg_to_ident(&relu.outputs[0]);
+        Ok(quote! {
+            let #out = crate::custom_ops::ops::my_relu(#input);
+        })
+    }
+}
+
+fn add_simplify_inputs(model_gen: &mut ModelGen) {
+    model_gen
+        .input("tests/simplify/simplify_shape_folding.onnx")
+        .input("tests/simplify/simplify_gather_on_shape.onnx")
+        .input("tests/simplify/simplify_slice_on_shape.onnx")
+        .input("tests/simplify/simplify_concat_shapes.onnx")
+        .input("tests/simplify/simplify_reshape_from_shape.onnx")
+        .input("tests/simplify/simplify_binary_ops_on_shape.onnx")
+        .input("tests/simplify/simplify_cast_shape.onnx")
+        .input("tests/simplify/simplify_where_on_shapes.onnx")
+        .input("tests/simplify/simplify_expand_from_shape.onnx")
+        .input("tests/simplify/simplify_constant_of_shape_opt.onnx")
+        .input("tests/simplify/simplify_gather_shape_chain.onnx")
+        .input("tests/simplify/simplify_permute_via_shape_gather.onnx")
+        .input("tests/simplify/simplify_sdpa_coalesce.onnx")
+        .input("tests/simplify/simplify_sdpa_prescale_alias.onnx")
+        .input("tests/simplify/simplify_constant_fold.onnx");
+}

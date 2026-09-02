@@ -1,0 +1,465 @@
+//! # Cast
+//!
+//! Casts the elements of a given input tensor to a specified data type.
+//!
+//! **ONNX Spec**: <https://onnx.ai/onnx/operators/onnx__Cast.html>
+//!
+//! ## Opset Versions
+//! - **Opset 1-5**: Basic cast operation with core numeric types
+//! - **Opset 6-8**: Extended type support for additional numeric types
+//! - **Opset 9-12**: Added string tensor casting support
+//! - **Opset 13-18**: Added bfloat16 support
+//! - **Opset 19-20**: Added float8 types (e4m3fn, e4m3fnuz, e5m2, e5m2fnuz) and saturate attribute
+//! - **Opset 21+**: Added float8e8m0 type and round_mode attribute
+//!
+//! ## Special Features
+//! - Supports casting from string tensor in plain (e.g., "3.14", "1000") and scientific notation
+//!   (e.g., "1e-5", "1E8") to float types.
+//! - The 'to' argument must match one of the data types in the TensorProto DataType enum.
+use derive_new::new;
+use onnx_ir_derive::NodeBuilder;
+
+use crate::ir::Argument;
+
+use crate::ir::{ArgType, AttributeValue, DType, Node, RawNode, TensorType};
+use crate::processor::{
+    InputSpec, NodeProcessor, NodeSpec, OutputPreferences, OutputSpec, ProcessError,
+};
+use crate::proto_conversion::element_type_from_proto;
+
+/// TensorProto DataType IDs for Float8 variants (not supported by Burn).
+/// The `saturate` (opset 19+) and `round_mode` (opset 21+) Cast attributes are
+/// float8-specific and are therefore also unsupported.
+const FLOAT8E4M3FN: i64 = 17;
+const FLOAT8E4M3FNUZ: i64 = 18;
+const FLOAT8E5M2: i64 = 19;
+const FLOAT8E5M2FNUZ: i64 = 20;
+const FLOAT8E8M0: i64 = 24;
+
+/// Configuration for Cast operations
+#[derive(Debug, Clone, new)]
+pub struct CastConfig {
+    /// Target element type to cast to
+    pub to: DType,
+}
+
+/// Node representation for Cast operation
+#[derive(Debug, Clone, NodeBuilder)]
+pub struct CastNode {
+    pub name: String,
+    pub inputs: Vec<Argument>,
+    pub outputs: Vec<Argument>,
+    pub config: CastConfig,
+}
+
+pub(crate) struct CastProcessor;
+
+impl NodeProcessor for CastProcessor {
+    type Config = CastConfig;
+
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            min_opset: 1,
+            max_opset: None,
+            inputs: InputSpec::Exact(1),
+            outputs: OutputSpec::Exact(1),
+        }
+    }
+
+    fn is_noop(&self, node: &RawNode) -> bool {
+        // Cast is a no-op when input and output types are identical
+        // (e.g., Cast(F32 tensor -> F32), Cast(Shape -> Shape))
+        node.inputs[0].ty == node.outputs[0].ty
+    }
+
+    fn infer_types(
+        &self,
+        node: &mut RawNode,
+        opset: usize,
+        _output_preferences: &OutputPreferences,
+    ) -> Result<(), ProcessError> {
+        // Get reference to config for type inference
+        let config = self.extract_config(node, opset)?;
+        let elem_type = config.to;
+
+        // Infer output type based on input type
+        let input = &mut node.inputs[0];
+        let output = &mut node.outputs[0];
+
+        match input.ty.clone() {
+            ArgType::Tensor(tensor) => {
+                if tensor.rank == 0 {
+                    // treat 0-dim tensor as scalar
+                    output.ty = ArgType::ScalarNative(elem_type);
+                    input.ty = ArgType::ScalarNative(tensor.dtype);
+                } else {
+                    // Cast input and output are the same shape, but possibly different types
+                    output.ty = ArgType::Tensor(TensorType {
+                        dtype: elem_type,
+                        rank: tensor.rank,
+                        static_shape: tensor.static_shape, // keep it
+                    });
+                }
+            }
+            ArgType::ScalarTensor(_) => output.ty = ArgType::ScalarTensor(elem_type),
+            ArgType::ScalarNative(_) => output.ty = ArgType::ScalarNative(elem_type),
+            ArgType::Shape(rank) => {
+                // When casting Shape to float or bool types, convert to 1D tensor
+                // This allows Shape values to be used in tensor operations
+                if elem_type.is_float() || elem_type.is_bool() {
+                    output.ty = ArgType::Tensor(TensorType {
+                        dtype: elem_type,
+                        rank: 1,
+                        static_shape: Some(vec![Some(rank)]),
+                    });
+                } else {
+                    // For int types, keep as Shape
+                    // This matches Burn's representation where shapes are always [i64; N]
+                    output.ty = ArgType::Shape(rank);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn extract_config(&self, node: &RawNode, _opset: usize) -> Result<Self::Config, ProcessError> {
+        // Extract the target element type from attributes
+        let elem_type = match node.attrs.get("to") {
+            Some(AttributeValue::Int64(type_id)) => {
+                // Float8 types are not supported. The saturate (opset 19+) and
+                // round_mode (opset 21+) attributes are float8-specific and are
+                // therefore also unsupported.
+                if matches!(
+                    *type_id,
+                    FLOAT8E4M3FN | FLOAT8E4M3FNUZ | FLOAT8E5M2 | FLOAT8E5M2FNUZ | FLOAT8E8M0
+                ) {
+                    return Err(ProcessError::InvalidAttribute {
+                        name: "to".to_string(),
+                        reason: format!(
+                            "Float8 dtype (type_id={type_id}) is not supported. \
+                             The saturate and round_mode attributes are float8-specific \
+                             and are therefore also unsupported."
+                        ),
+                    });
+                }
+                element_type_from_proto(*type_id as i32).map_err(|_| {
+                    ProcessError::InvalidAttribute {
+                        name: "to".to_string(),
+                        reason: format!("unsupported dtype: {}", type_id),
+                    }
+                })?
+            }
+            Some(_) => {
+                return Err(ProcessError::InvalidAttribute {
+                    name: "to".to_string(),
+                    reason: "must be Int64".to_string(),
+                });
+            }
+            None => {
+                return Err(ProcessError::MissingAttribute("to".to_string()));
+            }
+        };
+
+        let config = CastConfig::new(elem_type);
+        Ok(config)
+    }
+
+    fn build_node(&self, builder: RawNode, opset: usize) -> Node {
+        let config = self
+            .extract_config(&builder, opset)
+            .expect("Config extraction failed");
+
+        Node::Cast(CastNode {
+            name: builder.name,
+            inputs: builder.inputs,
+            outputs: builder.outputs,
+            config,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{Argument, BoolStore, NodeType, TensorType};
+    use crate::node::test_utils::TestNodeBuilder;
+    use crate::protos::tensor_proto::DataType;
+    use protobuf::Enum;
+    fn create_test_node(input_rank: usize, to_type: i64) -> RawNode {
+        TestNodeBuilder::new(NodeType::Cast, "test_cast")
+            .input_tensor_f32("X", input_rank, None)
+            .output_tensor_f32("Y", input_rank, None) // Element type will be overwritten
+            .attr_int("to", to_type)
+            .build()
+    }
+
+    // Additional test function to demonstrate scalar inputs
+    fn create_scalar_test_node(to_type: i64) -> RawNode {
+        TestNodeBuilder::new(NodeType::Cast, "test_cast")
+            .input_scalar_f32("X")
+            .output_scalar_f32("Y") // Element type will be overwritten
+            .attr_int("to", to_type)
+            .build()
+    }
+
+    #[test]
+    fn test_cast_config() {
+        let mut node = create_test_node(2, DataType::INT64.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.to, DType::I64);
+
+        let mut node = create_test_node(2, DataType::FLOAT.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.to, DType::F32);
+
+        let mut node = create_test_node(2, DataType::BOOL.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        assert_eq!(config.to, DType::Bool(BoolStore::Native));
+    }
+
+    #[test]
+    fn test_cast_float_to_int64() {
+        let mut node = create_test_node(2, DataType::INT64.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, DType::I64);
+                assert_eq!(tensor.rank, 2);
+            }
+            _ => panic!("Expected tensor output"),
+        }
+    }
+
+    #[test]
+    fn test_cast_scalar_handling() {
+        let mut node = create_test_node(0, DataType::BOOL.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::ScalarNative(elem_type) => {
+                assert_eq!(*elem_type, DType::Bool(BoolStore::Native));
+            }
+            _ => panic!("Expected scalar output for 0-rank tensor"),
+        }
+
+        match &node.inputs[0].ty {
+            ArgType::ScalarNative(elem_type) => {
+                assert_eq!(*elem_type, DType::F32);
+            }
+            _ => panic!("Input should have been converted to scalar"),
+        }
+    }
+
+    #[test]
+    fn test_cast_multiple_inputs() {
+        let mut node = create_test_node(2, DataType::INT64.value() as i64);
+        node.inputs.push(Argument {
+            name: "extra".to_string(),
+            ty: ArgType::Tensor(TensorType {
+                dtype: DType::F32,
+                rank: 1,
+                static_shape: None,
+            }),
+            value_source: crate::ir::ValueSource::Dynamic,
+            value_store: None,
+        });
+
+        let processor = CastProcessor;
+        let spec = processor.spec();
+        let result = crate::processor::validate_node_spec(&node, 16, &spec);
+        assert!(matches!(
+            result,
+            Err(ProcessError::InvalidInputCount {
+                expected: 1,
+                actual: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn test_cast_scalar_to_bool() {
+        let mut node = create_scalar_test_node(DataType::BOOL.value() as i64);
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::ScalarNative(elem_type) => {
+                assert_eq!(*elem_type, DType::Bool(BoolStore::Native));
+            }
+            _ => panic!("Expected scalar output"),
+        }
+    }
+
+    #[test]
+    fn test_cast_shape_to_float32() {
+        let mut node = TestNodeBuilder::new(NodeType::Cast, "test_cast")
+            .input_shape("shape_input", 3)
+            .output_shape("output", 3) // Will be overwritten
+            .attr_int("to", DataType::FLOAT.value() as i64)
+            .build();
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, DType::F32);
+                assert_eq!(tensor.rank, 1);
+                assert_eq!(tensor.static_shape, Some(vec![Some(3)]));
+            }
+            _ => panic!("Expected rank-1 tensor output when casting Shape to float"),
+        }
+    }
+
+    #[test]
+    fn test_cast_shape_to_int64_remains_shape() {
+        let mut node = TestNodeBuilder::new(NodeType::Cast, "test_cast")
+            .input_shape("shape_input", 4)
+            .output_shape("output", 4) // Will be preserved
+            .attr_int("to", DataType::INT64.value() as i64)
+            .build();
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Shape(rank) => {
+                assert_eq!(*rank, 4);
+            }
+            _ => panic!("Expected Shape output when casting Shape to int64"),
+        }
+    }
+
+    #[test]
+    fn test_cast_shape_to_bool() {
+        let mut node = TestNodeBuilder::new(NodeType::Cast, "test_cast")
+            .input_shape("shape_input", 3)
+            .output_shape("output", 3) // Will be overwritten
+            .attr_int("to", DataType::BOOL.value() as i64)
+            .build();
+
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        let _config = processor.extract_config(&node, 16).unwrap();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        match &node.outputs[0].ty {
+            ArgType::Tensor(tensor) => {
+                assert_eq!(tensor.dtype, DType::Bool(BoolStore::Native));
+                assert_eq!(tensor.rank, 1);
+                assert_eq!(tensor.static_shape, Some(vec![Some(3)]));
+            }
+            _ => panic!("Expected rank-1 bool tensor output when casting Shape to bool"),
+        }
+    }
+
+    #[test]
+    fn test_cast_is_noop_same_type() {
+        let mut node = create_test_node(2, DataType::FLOAT.value() as i64);
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        // F32 -> F32 is a no-op
+        assert!(processor.is_noop(&node));
+    }
+
+    #[test]
+    fn test_cast_is_not_noop_different_type() {
+        let mut node = create_test_node(2, DataType::INT64.value() as i64);
+        let processor = CastProcessor;
+        let prefs = OutputPreferences::new();
+        processor.infer_types(&mut node, 16, &prefs).unwrap();
+
+        // F32 -> I64 is not a no-op
+        assert!(!processor.is_noop(&node));
+    }
+
+    #[test]
+    fn test_cast_float8e4m3fn_rejected() {
+        // FLOAT8E4M3FN - should return a clear unsupported error
+        let node = create_test_node(2, FLOAT8E4M3FN);
+        let processor = CastProcessor;
+        let result = processor.extract_config(&node, 19);
+        assert!(
+            matches!(
+                result,
+                Err(ProcessError::InvalidAttribute { ref name, .. }) if name == "to"
+            ),
+            "Expected InvalidAttribute error for Float8 type, got: {:?}",
+            result
+        );
+        // Verify the error message mentions Float8
+        if let Err(ProcessError::InvalidAttribute { ref reason, .. }) = result {
+            assert!(
+                reason.contains("Float8"),
+                "Error reason should mention Float8: {}",
+                reason
+            );
+        }
+    }
+
+    #[test]
+    fn test_cast_float8e5m2fnuz_rejected() {
+        // FLOAT8E5M2FNUZ - should return a clear unsupported error
+        let node = create_test_node(2, FLOAT8E5M2FNUZ);
+        let processor = CastProcessor;
+        let result = processor.extract_config(&node, 19);
+        assert!(
+            matches!(
+                result,
+                Err(ProcessError::InvalidAttribute { ref name, .. }) if name == "to"
+            ),
+            "Expected InvalidAttribute error for Float8 type, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_cast_float8e8m0_rejected() {
+        // FLOAT8E8M0 (opset 21+, round_mode attribute) - should return a clear unsupported error
+        let node = create_test_node(2, FLOAT8E8M0);
+        let processor = CastProcessor;
+        let result = processor.extract_config(&node, 21);
+        assert!(
+            matches!(
+                result,
+                Err(ProcessError::InvalidAttribute { ref name, .. }) if name == "to"
+            ),
+            "Expected InvalidAttribute error for Float8E8M0 type, got: {:?}",
+            result
+        );
+    }
+}

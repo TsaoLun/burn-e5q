@@ -1,0 +1,123 @@
+[workspace]
+# Try
+# require version 2 to avoid "feature" additiveness for dev-dependencies
+# https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
+resolver = "2"
+
+members = [
+    "crates/burn-import",
+    "crates/burn-onnx",
+    "crates/onnx-ir",
+    "crates/onnx-ir-derive",
+    "crates/onnx-official-tests",
+    "crates/onnx-tests",
+    "crates/model-checks/*",
+    "examples/*",
+    "xtask",
+]
+
+default-members = [
+    "crates/burn-import",
+    "crates/burn-onnx",
+    "crates/onnx-ir",
+    "crates/onnx-ir-derive",
+    "crates/onnx-official-tests",
+    "crates/onnx-tests",
+    "xtask",
+]
+
+exclude = [
+    "crates/model-checks/__pycache__",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+version = "0.22.0-pre.3"
+
+[workspace.lints.clippy]
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+invalid_html_tags = "deny"
+
+[workspace.dependencies]
+### Internal crates ###
+# Declared here so each consumer Cargo.toml can use `workspace = true` instead of
+# repeating the path and version. Workspace deps pin `default-features = false`
+# (Cargo forbids consumers from overriding default-features when inheriting via
+# `workspace = true`); consumers that previously had defaults ON now opt in via
+# `features = ["default"]`.
+burn-import = { path = "crates/burn-import", version = "=0.22.0-pre.3", default-features = false }
+burn-onnx = { path = "crates/burn-onnx", version = "=0.22.0-pre.3", default-features = false }
+onnx-ir = { path = "crates/onnx-ir", version = "=0.22.0-pre.3", default-features = false }
+onnx-ir-derive = { path = "crates/onnx-ir-derive", version = "=0.22.0-pre.3" }
+model-checks-common = { path = "crates/model-checks/common" }
+
+bytemuck = "1.25.0"
+derive-new = { version = "0.7.0", default-features = false }
+float-cmp = "0.10.0"
+insta = "1.47.2"
+log = { default-features = false, version = "0.4.30" }
+proc-macro2 = "1.0.106"
+quote = "1.0.45"
+rust-format = "0.3.4"
+tracing-core = { version = "0.1.36", default-features = false }
+tracing-subscriber = "0.3.23"
+syn = { version = "3.0.3", features = ["full", "extra-traits"] }
+
+# onnx-ir
+half = { version = "2.7.1", features = [
+    "alloc",
+    "num-traits",
+    "serde",
+], default-features = false }
+protobuf = "3.7.2"
+protobuf-codegen = "3.7.2"
+regex = { version = "1.12.3", default-features = false, features = [
+    "perf",
+    "unicode",
+] }
+rstest = "0.26.1"
+serde = { version = "1.0.228", default-features = false, features = [
+    "derive",
+    "alloc",
+] } # alloc is for no_std, derive is needed
+strum = { version = "0.28.0", features = ["derive"] }
+bytes = { version = "1.11.1", default-features = false }
+hashbrown = "0.17"
+memmap2 = { version = "0.9" }
+ort = "=2.0.0-rc.13"
+tempfile = "3.24.0"
+thiserror = { version = "2", default-features = false }
+toml = { version = "1.1.2", default-features = false, features = ["parse", "serde"] }
+
+# 8-bit int_matmul + CpuGemm (TsaoLun/burn push was 403; snapshot on burn-e5q).
+burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
+burn-flex = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
+burn-pack = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
+burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
+burn-tensor = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
+
+### For local development. ###
+# burn = { path = "../burn/crates/burn", default-features = false }
+# burn-flex = { path = "../burn/crates/burn-flex", default-features = false }
+# burn-pack = { path = "../burn/crates/burn-pack", default-features = false }
+# burn-store = { path = "../burn/crates/burn-store", default-features = false }
+# burn-tensor = { path = "../burn/crates/burn-tensor", default-features = false }
+
+### For the release. ###
+# burn = { version = "=0.22.0-pre.3", default-features = false }
+# burn-flex = { version = "=0.22.0-pre.3", default-features = false }
+# burn-pack = { version = "=0.22.0-pre.3", default-features = false }
+# burn-store = { version = "=0.22.0-pre.3", default-features = false }
+# burn-tensor = { version = "=0.22.0-pre.3", default-features = false }
+
+### For xtask crate ###
+tracel-xtask = { version = "=5.1.0" }
+# ### For local development. ###
+# tracel-xtask = { path = "../xtask/crates/tracel-xtask", default-features = false }
+
+[profile.dev]
+debug = 1 # Speed up compilation time and not necessary.

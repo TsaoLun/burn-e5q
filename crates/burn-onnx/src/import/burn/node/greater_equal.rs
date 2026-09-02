@@ -1,0 +1,280 @@
+use super::prelude::*;
+
+impl NodeCodegen for onnx_ir::comparison::GreaterOrEqualNode {
+    fn inputs(&self) -> &[Argument] {
+        &self.inputs
+    }
+
+    fn outputs(&self) -> &[Argument] {
+        &self.outputs
+    }
+
+    fn forward(&self, scope: &mut ScopeAtPosition<'_>) -> TokenStream {
+        let lhs = self.inputs.first().unwrap();
+        let rhs = self.inputs.get(1).unwrap();
+        let output = arg_to_ident(self.outputs.first().unwrap());
+
+        let lhs_value = scope.arg(lhs);
+
+        let rhs_value = scope.arg(rhs);
+
+        let function = match (&lhs.ty, &rhs.ty) {
+            (lhs_ty, rhs_ty) if lhs_ty.is_on_device() && rhs_ty.is_on_device() => {
+                let lhs_rank = lhs_ty.rank();
+                let rhs_rank = rhs_ty.rank();
+                let lhs_bc =
+                    broadcast_helpers::leading_broadcast(quote! { #lhs_value }, lhs_rank, rhs_rank);
+                let rhs_bc =
+                    broadcast_helpers::leading_broadcast(quote! { #rhs_value }, rhs_rank, lhs_rank);
+                quote! { #lhs_bc.greater_equal(#rhs_bc) }
+            }
+            (lhs_ty, ArgType::ScalarNative(_)) if lhs_ty.is_on_device() => {
+                quote! { #lhs_value.greater_equal_elem(#rhs_value) }
+            }
+            (ArgType::ScalarNative(_), rhs_ty) if rhs_ty.is_on_device() => {
+                // L >= R == R <= L
+                quote! { #rhs_value.lower_equal_elem(#lhs_value) }
+            }
+            (ArgType::Shape(_), rhs_ty) if rhs_ty.is_on_device() => {
+                let dtype_tokens = rhs_ty.elem_type().to_tokens();
+                quote! {
+                    Tensor::<1, burn::tensor::Int>::from_data(
+                        burn::tensor::TensorData::from(&#lhs_value as &[i64]),
+                        (&self.device, #dtype_tokens)
+                    ).greater_equal(#rhs_value)
+                }
+            }
+            (lhs_ty, ArgType::Shape(_)) if lhs_ty.is_on_device() => {
+                let dtype_tokens = lhs_ty.elem_type().to_tokens();
+                quote! {
+                    #lhs_value.greater_equal(Tensor::<1, burn::tensor::Int>::from_data(
+                        burn::tensor::TensorData::from(&#rhs_value as &[i64]),
+                        (&self.device, #dtype_tokens)
+                    ))
+                }
+            }
+            (ArgType::ScalarNative(_), ArgType::ScalarNative(_)) => {
+                quote! { #lhs_value >= #rhs_value }
+            }
+            (ArgType::Shape(_), ArgType::Shape(_)) => quote! {
+                {
+                    let mut result = #lhs_value;
+                    for (result_item, rhs_item) in result.iter_mut().zip(#rhs_value.iter()) {
+                        *result_item = if result_item >= rhs_item { 1i64 } else { 0i64 };
+                    }
+                    result
+                }
+            },
+            (lhs, rhs) => panic!("greater_equal is not supported for {lhs:?} >= {rhs:?}"),
+        };
+
+        quote! {
+            let #output = #function;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_helpers::*;
+    use burn::tensor::{BoolStore, DType};
+    use insta::assert_snapshot;
+    use onnx_ir::comparison::GreaterOrEqualNodeBuilder;
+
+    // --- on_device + on_device ---
+
+    #[test]
+    fn test_tensor_tensor_same_rank() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 2, DType::F32)
+            .input_tensor("rhs", 2, DType::F32)
+            .output_tensor("output", 2, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<2>, rhs: Tensor<2>) -> Tensor<2, Bool> {
+            let output = lhs.greater_equal(rhs);
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_tensor_tensor_broadcast_lhs_higher() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 3, DType::F32)
+            .input_tensor("rhs", 2, DType::F32)
+            .output_tensor("output", 3, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<3>, rhs: Tensor<2>) -> Tensor<3, Bool> {
+            let output = lhs.greater_equal((rhs).unsqueeze_dims(&[0isize]));
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_tensor_tensor_broadcast_rhs_higher() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 2, DType::F32)
+            .input_tensor("rhs", 3, DType::F32)
+            .output_tensor("output", 3, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<2>, rhs: Tensor<3>) -> Tensor<3, Bool> {
+            let output = (lhs).unsqueeze_dims(&[0isize]).greater_equal(rhs);
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_tensor_scalar_tensor() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 3, DType::F32)
+            .input_scalar_tensor("rhs", DType::F32)
+            .output_tensor("output", 3, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<3>, rhs: Tensor<1>) -> Tensor<3, Bool> {
+            let output = lhs.greater_equal((rhs).unsqueeze_dims(&[0isize, 1isize]));
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_scalar_tensor_tensor() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_scalar_tensor("lhs", DType::F32)
+            .input_tensor("rhs", 3, DType::F32)
+            .output_tensor("output", 3, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<1>, rhs: Tensor<3>) -> Tensor<3, Bool> {
+            let output = (lhs).unsqueeze_dims(&[0isize, 1isize]).greater_equal(rhs);
+            output
+        }
+        ");
+    }
+
+    // --- on_device + ScalarNative ---
+
+    #[test]
+    fn test_tensor_scalar_native() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 2, DType::F32)
+            .input_scalar("rhs", DType::F32)
+            .output_tensor("output", 2, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<2>, rhs: f32) -> Tensor<2, Bool> {
+            let output = lhs.greater_equal_elem(rhs);
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_scalar_native_tensor() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_scalar("lhs", DType::F32)
+            .input_tensor("rhs", 2, DType::F32)
+            .output_tensor("output", 2, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: f32, rhs: Tensor<2>) -> Tensor<2, Bool> {
+            let output = rhs.lower_equal_elem(lhs);
+            output
+        }
+        ");
+    }
+
+    // --- Shape + on_device ---
+
+    #[test]
+    fn test_shape_tensor() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_shape("lhs", 4)
+            .input_tensor("rhs", 1, DType::I64)
+            .output_tensor("output", 1, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: [i64; 4], rhs: Tensor<1, Int>) -> Tensor<1, Bool> {
+            let output = Tensor::<
+                1,
+                burn::tensor::Int,
+            >::from_data(
+                    burn::tensor::TensorData::from(&lhs as &[i64]),
+                    (&self.device, burn::tensor::DType::I64),
+                )
+                .greater_equal(rhs);
+            output
+        }
+        ");
+    }
+
+    #[test]
+    fn test_tensor_shape() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_tensor("lhs", 1, DType::I64)
+            .input_shape("rhs", 4)
+            .output_tensor("output", 1, DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: Tensor<1, Int>, rhs: [i64; 4]) -> Tensor<1, Bool> {
+            let output = lhs
+                .greater_equal(
+                    Tensor::<
+                        1,
+                        burn::tensor::Int,
+                    >::from_data(
+                        burn::tensor::TensorData::from(&rhs as &[i64]),
+                        (&self.device, burn::tensor::DType::I64),
+                    ),
+                );
+            output
+        }
+        ");
+    }
+
+    // --- ScalarNative + ScalarNative ---
+
+    #[test]
+    fn test_scalar_native_scalar_native() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_scalar("lhs", DType::F32)
+            .input_scalar("rhs", DType::F32)
+            .output_scalar("output", DType::Bool(BoolStore::Native))
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: f32, rhs: f32) -> bool {
+            let output = lhs >= rhs;
+            output
+        }
+        ");
+    }
+
+    // --- Shape + Shape ---
+
+    #[test]
+    fn test_shape_shape() {
+        let node = GreaterOrEqualNodeBuilder::new("ge1")
+            .input_shape("lhs", 4)
+            .input_shape("rhs", 4)
+            .output_shape("output", 4)
+            .build();
+        assert_snapshot!(codegen_forward_default(&node), @r"
+        pub fn forward(&self, lhs: [i64; 4], rhs: [i64; 4]) -> [i64; 4] {
+            let output = {
+                let mut result = lhs;
+                for (result_item, rhs_item) in result.iter_mut().zip(rhs.iter()) {
+                    *result_item = if result_item >= rhs_item { 1i64 } else { 0i64 };
+                }
+                result
+            };
+            output
+        }
+        ");
+    }
+}

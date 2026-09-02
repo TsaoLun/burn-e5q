@@ -1,0 +1,533 @@
+//! ONNX node representation
+//!
+//! This module contains types for representing ONNX nodes, including their types,
+//! configuration, inputs, outputs, and attributes.
+
+use strum::EnumString;
+
+use super::argument::Argument;
+use super::attribute::Attributes;
+
+// ============================================================================
+// RawNode - Intermediate representation from ONNX parsing
+// ============================================================================
+
+/// Reference to a runtime input by name and index.
+/// Used in configs to point to node inputs instead of storing stale copies.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RuntimeInputRef {
+    /// Name of the input argument
+    pub name: String,
+    /// Index in the node's inputs array
+    pub input_index: usize,
+}
+
+impl RuntimeInputRef {
+    pub fn new(name: String, input_index: usize) -> Self {
+        Self { name, input_index }
+    }
+}
+
+impl RawNode {
+    /// Get a non-optional input by index.
+    ///
+    /// Returns `None` if the index is out of bounds or the input is optional
+    /// (not provided in the ONNX model).
+    pub(crate) fn get_input(&self, index: usize) -> Option<&Argument> {
+        self.inputs.get(index).filter(|arg| !arg.is_optional())
+    }
+}
+
+/// Raw ONNX identity of a custom (non-built-in) operator.
+///
+/// Present only on nodes whose `node_type` is [`NodeType::Custom`]. Built-in and
+/// synthetic nodes do not carry it: their identity is the `NodeType` itself.
+#[derive(Debug, Clone)]
+pub(crate) struct CustomIdentity {
+    /// Raw ONNX op_type, e.g. "FftReal"
+    pub op_type: String,
+    /// Raw ONNX domain, e.g. "custom_domain" ("" = default domain)
+    pub domain: String,
+    /// Opset version of `domain` from the model's opset_import
+    pub domain_opset: usize,
+}
+
+/// Nodes produced by the ONNX parser
+#[derive(Clone, Debug)]
+pub(crate) struct RawNode {
+    /// The type of the node.
+    /// This should be a valid ONNX operator.
+    pub node_type: NodeType,
+
+    /// The name of the node.
+    pub name: String,
+
+    /// The inputs of the node.
+    pub inputs: Vec<Argument>,
+
+    /// The outputs of the node.
+    pub outputs: Vec<Argument>,
+
+    /// ONNX attributes (opset-specific parameters)
+    pub(crate) attrs: Attributes,
+
+    /// Raw (op_type, domain, domain opset) for custom ops; `None` for built-ins.
+    pub custom_identity: Option<CustomIdentity>,
+}
+
+// ============================================================================
+// Node enum - Type-safe representation with operation-specific config
+// ============================================================================
+
+use crate::node::*;
+
+/// Macro to define both NodeType and Node enums from a single source
+///
+/// The `@custom` sentinel entry declares the variant used for ops outside the
+/// built-in set (non-standard domains or unknown default-domain op_types). It is
+/// emitted with `#[strum(disabled)]` so `NodeType::from_str` can never resolve to
+/// it by string match; the only way to obtain it is the parser's explicit
+/// fallback in `proto_conversion`.
+macro_rules! define_node_enum {
+    (
+        @custom $custom_variant:ident => $custom_type:ty,
+        $(
+            $(#[$variant_meta:meta])*
+            $variant:ident => $node_type:ty
+        ),* $(,)?
+    ) => {
+        /// Supported ONNX operators (plus Burn-specific extensions for dimensional mapping)
+        ///
+        /// See: <https://onnx.ai/onnx/operators/index.html>
+        ///
+        /// Note: Some operators have dimensional variants (e.g., Conv1d, Conv2d, Conv3d) that are
+        /// Burn-specific extensions for better type safety and code generation.
+        #[derive(Debug, Hash, Eq, PartialEq, EnumString, Clone)]
+        #[strum(ascii_case_insensitive)]
+        pub enum NodeType {
+            /// Sentinel for ops outside the built-in set. Never produced by
+            /// `from_str`; assigned only by the parser's domain-aware fallback.
+            #[strum(disabled)]
+            $custom_variant,
+            $(
+                $(#[$variant_meta])*
+                $variant,
+            )*
+        }
+
+        // Display is hand-written (not the strum derive) so the disabled
+        // `Custom` variant is guaranteed printable: it is used in node
+        // renaming and logging.
+        impl ::core::fmt::Display for NodeType {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                match self {
+                    NodeType::$custom_variant => f.write_str(stringify!($custom_variant)),
+                    $(
+                        NodeType::$variant => f.write_str(stringify!($variant)),
+                    )*
+                }
+            }
+        }
+
+        /// Enum-based node representation
+        ///
+        /// Each ONNX operation is represented as a separate enum variant containing
+        /// the operation-specific node struct.
+        #[derive(Debug, Clone)]
+        pub enum Node {
+            /// A custom (non-built-in) op, preserved with its raw ONNX identity.
+            $custom_variant($custom_type),
+            $(
+                $(#[$variant_meta])*
+                $variant($node_type),
+            )*
+        }
+
+        impl Node {
+            /// Get the node name
+            pub fn name(&self) -> &str {
+                match self {
+                    Node::$custom_variant(inner) => &inner.name,
+                    $(
+                        Node::$variant(inner) => &inner.name,
+                    )*
+                }
+            }
+
+            /// Get the node inputs
+            pub fn inputs(&self) -> &[Argument] {
+                match self {
+                    Node::$custom_variant(inner) => &inner.inputs,
+                    $(
+                        Node::$variant(inner) => &inner.inputs,
+                    )*
+                }
+            }
+
+            /// Get mutable node inputs (internal use only)
+            pub(crate) fn inputs_mut(&mut self) -> &mut Vec<Argument> {
+                match self {
+                    Node::$custom_variant(inner) => &mut inner.inputs,
+                    $(
+                        Node::$variant(inner) => &mut inner.inputs,
+                    )*
+                }
+            }
+
+            /// Get the node outputs
+            pub fn outputs(&self) -> &[Argument] {
+                match self {
+                    Node::$custom_variant(inner) => &inner.outputs,
+                    $(
+                        Node::$variant(inner) => &inner.outputs,
+                    )*
+                }
+            }
+
+            /// Get mutable node outputs (internal use only)
+            pub(crate) fn outputs_mut(&mut self) -> &mut Vec<Argument> {
+                match self {
+                    Node::$custom_variant(inner) => &mut inner.outputs,
+                    $(
+                        Node::$variant(inner) => &mut inner.outputs,
+                    )*
+                }
+            }
+
+            /// Get the NodeType corresponding to this node's variant
+            pub fn node_type(&self) -> NodeType {
+                match self {
+                    Node::$custom_variant(_) => NodeType::$custom_variant,
+                    $(
+                        Node::$variant(_) => NodeType::$variant,
+                    )*
+                }
+            }
+        }
+
+        impl ::core::fmt::Display for Node {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                match self {
+                    Node::$custom_variant(inner) => write!(f, "{inner}"),
+                    $(
+                        Node::$variant(inner) => write!(f, "{inner}"),
+                    )*
+                }
+            }
+        }
+    };
+}
+
+define_node_enum! {
+    // CUSTOM (non-built-in) OPERATIONS
+    @custom Custom => custom::CustomNode,
+
+    // ARITHMETIC & BASIC OPERATIONS
+    Add => arithmetic::AddNode,
+    Sub => arithmetic::SubNode,
+    Mul => arithmetic::MulNode,
+    Div => arithmetic::DivNode,
+    Neg => neg::NegNode,
+    Abs => abs::AbsNode,
+    Pow => pow::PowNode,
+    Reciprocal => reciprocal::ReciprocalNode,
+    Sqrt => sqrt::SqrtNode,
+    Exp => exp::ExpNode,
+    Log => log::LogNode,
+    Ceil => ceil::CeilNode,
+    Floor => floor::FloorNode,
+    Round => round::RoundNode,
+    Sign => sign::SignNode,
+    Erf => erf::ErfNode,
+
+    // TRIGONOMETRIC OPERATIONS
+    Sin => sin::SinNode,
+    Cos => cos::CosNode,
+    Tan => tan::TanNode,
+    Asin => asin::AsinNode,
+    Acos => acos::AcosNode,
+    Atan => atan::AtanNode,
+    Sinh => sinh::SinhNode,
+    Cosh => cosh::CoshNode,
+    Tanh => tanh::TanhNode,
+    Asinh => asinh::AsinhNode,
+    Acosh => acosh::AcoshNode,
+    Atanh => atanh::AtanhNode,
+
+    // ACTIVATION FUNCTIONS
+    Relu => relu::ReluNode,
+    Sigmoid => sigmoid::SigmoidNode,
+    Softmax => softmax::SoftmaxNode,
+    LogSoftmax => log_softmax::LogSoftmaxNode,
+    LeakyRelu => leaky_relu::LeakyReluNode,
+    HardSigmoid => hard_sigmoid::HardSigmoidNode,
+    Elu => elu::EluNode,
+    Selu => selu::SeluNode,
+    Celu => celu::CeluNode,
+    Gelu => gelu::GeluNode,
+    Mish => mish::MishNode,
+    Softplus => softplus::SoftplusNode,
+    Softsign => softsign::SoftsignNode,
+    ThresholdedRelu => thresholded_relu::ThresholdedReluNode,
+    HardSwish => hard_swish::HardSwishNode,
+    PRelu => prelu::PReluNode,
+
+    // COMPARISON & LOGICAL OPERATIONS
+    Equal => comparison::EqualNode,
+    Greater => comparison::GreaterNode,
+    GreaterOrEqual => comparison::GreaterOrEqualNode,
+    Less => comparison::LessNode,
+    LessOrEqual => comparison::LessOrEqualNode,
+    And => and::AndNode,
+    Or => or::OrNode,
+    Xor => xor::XorNode,
+    Not => not::NotNode,
+    Where => where_op::WhereNode,
+
+    // BITWISE OPERATIONS
+    BitwiseAnd => bitwiseand::BitwiseAndNode,
+    BitwiseOr => bitwiseor::BitwiseOrNode,
+    BitwiseXor => bitwisexor::BitwiseXorNode,
+    BitwiseNot => bitwisenot::BitwiseNotNode,
+    BitShift => bitshift::BitShiftNode,
+
+    // REDUCTION OPERATIONS
+    ArgMax => argmax::ArgMaxNode,
+    ArgMin => argmin::ArgMinNode,
+    ReduceMax => reduce::ReduceMaxNode,
+    ReduceMin => reduce::ReduceMinNode,
+    ReduceMean => reduce::ReduceMeanNode,
+    ReduceSum => reduce::ReduceSumNode,
+    ReduceProd => reduce::ReduceProdNode,
+    ReduceL1 => reduce::ReduceL1Node,
+    ReduceL2 => reduce::ReduceL2Node,
+    ReduceLogSum => reduce::ReduceLogSumNode,
+    ReduceLogSumExp => reduce::ReduceLogSumExpNode,
+    ReduceSumSquare => reduce::ReduceSumSquareNode,
+
+    // AGGREGATION OPERATIONS
+    Max => max::MaxNode,
+    Min => min::MinNode,
+    Mean => mean::MeanNode,
+    Sum => sum::SumNode,
+
+    // TENSOR MANIPULATION
+    Cast => cast::CastNode,
+    CastLike => cast_like::CastLikeNode,
+    Clip => clip::ClipNode,
+    Concat => concat::ConcatNode,
+    Expand => expand::ExpandNode,
+    Flatten => flatten::FlattenNode,
+    Gather => gather::GatherNode,
+    GatherElements => gather_elements::GatherElementsNode,
+    GatherND => gathernd::GatherNDNode,
+    Pad => pad::PadNode,
+    Reshape => reshape::ReshapeNode,
+    Resize => resize::ResizeNode,
+    /// Deprecated predecessor of Resize; shares its node and codegen.
+    Upsample => resize::ResizeNode,
+    Scatter => unsupported::ScatterNode,
+    ScatterElements => scatter_elements::ScatterElementsNode,
+    ScatterND => scatter_nd::ScatterNDNode,
+    Shape => shape::ShapeNode,
+    Size => size::SizeNode,
+    Slice => slice::SliceNode,
+    Split => split::SplitNode,
+    Squeeze => squeeze::SqueezeNode,
+    Tile => tile::TileNode,
+    Transpose => transpose::TransposeNode,
+    Unsqueeze => unsqueeze::UnsqueezeNode,
+    DepthToSpace => depth_to_space::DepthToSpaceNode,
+    SpaceToDepth => space_to_depth::SpaceToDepthNode,
+
+    // MATRIX OPERATIONS
+    MatMul => matmul::MatMulNode,
+    MatMulInteger => matmulinteger::MatMulIntegerNode,
+    Gemm => gemm::GemmNode,
+
+    // CONVOLUTION & POOLING
+    Conv1d => conv1d::Conv1dNode,
+    Conv2d => conv2d::Conv2dNode,
+    Conv3d => conv3d::Conv3dNode,
+    ConvTranspose1d => conv_transpose1d::ConvTranspose1dNode,
+    ConvTranspose2d => conv_transpose2d::ConvTranspose2dNode,
+    ConvTranspose3d => conv_transpose3d::ConvTranspose3dNode,
+    AveragePool1d => avg_pool1d::AveragePool1dNode,
+    AveragePool2d => avg_pool2d::AveragePool2dNode,
+    AveragePool3d => avg_pool3d::AveragePool3dNode,
+    LpPool1d => lp_pool1d::LpPool1dNode,
+    LpPool2d => lp_pool2d::LpPool2dNode,
+    MaxPool1d => max_pool1d::MaxPool1dNode,
+    MaxPool2d => max_pool2d::MaxPool2dNode,
+    MaxPool3d => max_pool3d::MaxPool3dNode,
+    GlobalAveragePool => global_avg_pool::GlobalAveragePoolNode,
+    GlobalLpPool => global_lp_pool::GlobalLpPoolNode,
+    GlobalMaxPool => unsupported::GlobalMaxPoolNode,
+
+    // NORMALIZATION
+    BatchNormalization => batch_norm::BatchNormalizationNode,
+    InstanceNormalization => instance_norm::InstanceNormalizationNode,
+    LayerNormalization => layer_norm::LayerNormalizationNode,
+    GroupNormalization => group_norm::GroupNormalizationNode,
+    MeanVarianceNormalization => mean_variance_normalization::MeanVarianceNormalizationNode,
+    LpNormalization => lp_normalization::LpNormalizationNode,
+
+    // DROPOUT & REGULARIZATION
+    Dropout => dropout::DropoutNode,
+
+    // LINEAR & SPECIAL LAYERS
+    Linear => linear::LinearNode,
+    Attention => attention::AttentionNode,
+
+    // CONSTANT GENERATION
+    Constant => constant::ConstantNode,
+    ConstantOfShape => constant_of_shape::ConstantOfShapeNode,
+    EyeLike => eye_like::EyeLikeNode,
+    Identity => identity::IdentityNode,
+
+    // RANDOM OPERATIONS
+    RandomNormal => random::RandomNormalNode,
+    RandomUniform => random::RandomUniformNode,
+    RandomNormalLike => random_like::RandomNormalLikeNode,
+    RandomUniformLike => random_like::RandomUniformLikeNode,
+    Bernoulli => bernoulli::BernoulliNode,
+
+    // RANGE & SEQUENCE OPERATIONS
+    Range => range::RangeNode,
+    OneHot => one_hot::OneHotNode,
+
+    // CONTROL FLOW
+    If => if_node::IfNode,
+    Loop => loop_node::LoopNode,
+    Scan => scan_node::ScanNode,
+
+    // SPECIAL OPERATIONS
+    IsInf => is_inf::IsInfNode,
+    IsNaN => is_nan::IsNaNNode,
+    NonZero => nonzero::NonZeroNode,
+    TopK => topk::TopKNode,
+    Unique => unsupported::UniqueNode,
+    Trilu => trilu::TriluNode,
+    Mod => modulo::ModNode,
+    CumSum => cumsum::CumSumNode,
+
+    // UNSUPPORTED / PLACEHOLDER OPERATIONS (not yet implemented in burn-onnx)
+    AffineGrid => unsupported::AffineGridNode,
+    AveragePool => unsupported::AveragePoolNode,
+    BlackmanWindow => blackman_window::BlackmanWindowNode,
+    CenterCropPad => unsupported::CenterCropPadNode,
+    Col2Im => col2im::Col2ImNode,
+    Compress => unsupported::CompressNode,
+    ConcatFromSequence => unsupported::ConcatFromSequenceNode,
+    Conv => unsupported::ConvNode,
+    ConvInteger => unsupported::ConvIntegerNode,
+    ConvTranspose => unsupported::ConvTransposeNode,
+    Dft => dft::DftNode,
+    DeformConv => deform_conv::DeformConvNode,
+    DequantizeLinear => dequantize_linear::DequantizeLinearNode,
+    Det => det::DetNode,
+    DynamicQuantizeLinear => dynamic_quantize_linear::DynamicQuantizeLinearNode,
+    Einsum => einsum::EinsumNode,
+    GridSample => grid_sample::GridSampleNode,
+    Gru => gru::GruNode,
+    HammingWindow => hamming_window::HammingWindowNode,
+    HannWindow => hann_window::HannWindowNode,
+    Hardmax => hardmax::HardmaxNode,
+    Im => unsupported::ImNode,
+    ImageDecoder => unsupported::ImageDecoderNode,
+    Imputer => imputer::ImputerNode,
+    LpPool => unsupported::LpPoolNode,
+    Lrn => lrn::LrnNode,
+    Lstm => lstm::LstmNode,
+    MaxPool => unsupported::MaxPoolNode,
+    MaxRoiPool => unsupported::MaxRoiPoolNode,
+    MaxUnpool => unsupported::MaxUnpoolNode,
+    MelWeightMatrix => mel_weight_matrix::MelWeightMatrixNode,
+    Multinomial => unsupported::MultinomialNode,
+    NegativeLogLikelihoodLoss => unsupported::NegativeLogLikelihoodLossNode,
+    NonMaxSuppression => unsupported::NonMaxSuppressionNode,
+    Optional => unsupported::OptionalNode,
+    OptionalGetElement => unsupported::OptionalGetElementNode,
+    OptionalHasElement => unsupported::OptionalHasElementNode,
+    QLinearConv => unsupported::QLinearConvNode,
+    QLinearMatMul => qlinear_matmul::QLinearMatMulNode,
+    QuantizeLinear => quantize_linear::QuantizeLinearNode,
+    RMSNormalization => unsupported::RMSNormalizationNode,
+    Rnn => rnn::RnnNode,
+    RegexFullMatch => unsupported::RegexFullMatchNode,
+    ReverseSequence => unsupported::ReverseSequenceNode,
+    RoiAlign => unsupported::RoiAlignNode,
+    RotaryEmbedding => unsupported::RotaryEmbeddingNode,
+    Scaler => scaler::ScalerNode,
+    SequenceAt => unsupported::SequenceAtNode,
+    SequenceConstruct => unsupported::SequenceConstructNode,
+    SequenceEmpty => unsupported::SequenceEmptyNode,
+    SequenceErase => unsupported::SequenceEraseNode,
+    SequenceInsert => unsupported::SequenceInsertNode,
+    SequenceLength => unsupported::SequenceLengthNode,
+    SequenceMap => unsupported::SequenceMapNode,
+    Shrink => shrink::ShrinkNode,
+    SoftmaxCrossEntropyLoss => unsupported::SoftmaxCrossEntropyLossNode,
+    SplitToSequence => unsupported::SplitToSequenceNode,
+    Stft => stft::StftNode,
+    StringConcat => unsupported::StringConcatNode,
+    StringNormalizer => unsupported::StringNormalizerNode,
+    StringSplit => unsupported::StringSplitNode,
+    SVMRegressor => svmregressor::SVMRegressorNode,
+    Swish => swish::SwishNode,
+    TensorScatter => unsupported::TensorScatterNode,
+    TfIdfVectorizer => unsupported::TfIdfVectorizerNode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{ArgType, DType, TensorType, ValueSource};
+
+    fn make_arg(name: &str, source: ValueSource) -> Argument {
+        Argument {
+            name: name.to_string(),
+            ty: ArgType::Tensor(TensorType {
+                dtype: DType::F32,
+                rank: 2,
+                static_shape: None,
+            }),
+            value_source: source,
+            value_store: None,
+        }
+    }
+
+    fn make_raw_node(inputs: Vec<Argument>) -> RawNode {
+        RawNode {
+            custom_identity: None,
+            node_type: NodeType::Pad,
+            name: "test".to_string(),
+            inputs,
+            outputs: vec![],
+            attrs: Default::default(),
+        }
+    }
+
+    #[test]
+    fn get_input_returns_normal_input() {
+        let node = make_raw_node(vec![make_arg("data", ValueSource::Dynamic)]);
+        assert!(node.get_input(0).is_some());
+        assert_eq!(node.get_input(0).unwrap().name, "data");
+    }
+
+    #[test]
+    fn get_input_returns_none_for_optional() {
+        let node = make_raw_node(vec![
+            make_arg("data", ValueSource::Dynamic),
+            make_arg("", ValueSource::Optional),
+        ]);
+        assert!(node.get_input(0).is_some());
+        assert!(node.get_input(1).is_none());
+    }
+
+    #[test]
+    fn get_input_returns_none_for_out_of_bounds() {
+        let node = make_raw_node(vec![make_arg("data", ValueSource::Dynamic)]);
+        assert!(node.get_input(5).is_none());
+    }
+}
