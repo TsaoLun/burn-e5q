@@ -76,8 +76,8 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 下一步（按优先级）
 
-1. **阶段 4**（`notes/stage-4.md` / `notes/stage-4-impl.md`）：i8 GEMM 栈已接线；延迟见下文「阶段 4」。下一步是融合 zp、砍 launch，而不是再写一套朴素 GEMM。
-2. 内存：若阶段 4 后 scratch 仍超预算，默认预算降 2048（flex 已验证可行）。
+1. **flex 加速**（`notes/flex-accel.md`）：分块 u8/i8 GEMM 已落地；短文本 130→76 ms，512 tok 3.82→2.80 s。还没打平 ort。
+2. **阶段 4 cubecl**：接线见下文；短文本仍被 launch 卡住。下一步是融合 zp，不是再写朴素 GEMM。
 3. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
 
 ---
@@ -137,3 +137,40 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 1. 把 zp 补偿融进同一个 integer GEMM（`(A-za)@(B-zb)` 一次 launch），砍掉每层两次 `sum_dim`。
 2. 给 8-bit 叶子真正的 VNNI/AMX 微内核（或确认 LLVM 已打出 `vpdpbusd`）。
 3. 有写权限后把 `vendor/*` 迁回 TsaoLun/{cubek,burn,burn-onnx,cubecl} 真分支。
+
+---
+
+# flex 加速：分块 u8/i8/i32 GEMM
+
+> 日期：2026-09-02。同一台 4 核 Xeon。`vendor/burn-route-int8-matmul` `005354fd`。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`（默认 flex）。
+> 实现：`notes/flex-accel.md`。codegen 仍是代数 zp（与 cubecl 共用）。
+
+## TL;DR
+
+| 维度 | 结果 | 判定 |
+|---|---|---|
+| 数值 | min cos 0.9935，mean **0.9960**（与阶段 3 flex 一致） | ✅ |
+| 检索 | top-1 2/2；top-3 严格顺序 0/2 | ⚠️ 同前 |
+| 短文本 | **75.7 ms**（本机旧 flex 130 ms → **1.7×**） | ✅ |
+| 512 tok | **2797 ms**（旧 3.82 s → **1.4×**） | ✅ |
+| vs Mac ort | 短 18×，512 **14×**（旧 30× / 19×） | 仍未达 ~2× |
+| vs 本机 AMX ort | 短 ~22×，512 ~56× | 需要 VNNI/融合 |
+| vs cubecl-cpu | 短 1936→76 ms；512 3201→2797 ms | flex 仍是短查询正解 |
+
+模型加载 150 ms，RSS 88 MB；全流程后 **254 MB**（cubecl 同流程 665 MB）。
+`mem_stress -- 5 2048`：峰值 **230 MB**（进 512 MB 预算；cubecl 同预算 516 MB）。4×512 稳态约 11.7 s（cubecl ~6.2 s，大 batch 仍是 cubecl 更快）。
+
+## 延迟明细
+
+| 场景 | 本机旧 flex | 本机新 flex | cubecl-cpu | Mac ort | 本机 ort |
+|---|---:|---:|---:|---:|---:|
+| 16 tok | 130 ms | **75.7 ms** | 1936 ms | 4.3 ms | 3.4 ms |
+| 8 条 batch | 26.2 s | **18.1 s** | 7.2 s | 1.41 s | 0.53 s |
+| 512 tok | 3.82 s | **2.80 s** | 3.20 s | 201 ms | 50 ms |
+
+8 条 batch 上 cubecl 仍更快（更大 `M` 摊薄 launch）。单条短/长查询 flex 更好。
+
+## 还剩什么
+
+内核还不是 `vpdpbusd`；96 个 DQL 和代数 zp 的 `sum_dim` 仍在。短文本再往下会碰到这些固定开销，不是再改一版三重循环能解决的。

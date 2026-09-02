@@ -13,6 +13,14 @@
 - 累加用 wrapping i32，与旧 kernel / ONNX MatMulInteger 一致。
 - 无新增 `unsafe`。
 
-## 对拍数字
+## 对拍数字（本机 4 核 Xeon）
 
-见 `notes/poc-results.md`「flex 加速」一节（跑完 `compare_ort` 后填写）。
+| 场景 | 旧 flex | 新 flex | vs 旧 | vs Mac ort |
+|---|---:|---:|---:|---:|
+| 16 tok | 130 ms | **75.7 ms** | 1.7× | 18× |
+| 8 条 batch | 26.2 s | **18.1 s** | 1.4× | 13× |
+| 512 tok | 3.82 s | **2.80 s** | 1.4× | 14× |
+
+mean cos **0.9960**，与阶段 3 相同。加载后 RSS 88 MB，全流程 254 MB。
+
+详见 `notes/poc-results.md`「flex 加速」。
