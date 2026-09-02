@@ -125,8 +125,10 @@ impl NodeCodegen for onnx_ir::matmulinteger::MatMulIntegerNode {
     }
 }
 
-/// `lhs @ rhs` in the operands' native dtype, plus algebraic zero-point
-/// correction in `output_dtype` (I32).
+/// `lhs @ rhs` in the operands' native dtype. Zero-points are passed through
+/// to `Tensor::matmul_integer` so a backend can fuse
+/// `(A-za)@(B-zb)` into one GEMM (flex VNNI does). Each zp identifier is
+/// cloned — e5 reuses a DQL zp across several MatMulInteger nodes.
 fn integer_matmul_with_zp(
     lhs: TokenStream,
     rhs: TokenStream,
@@ -139,46 +141,16 @@ fn integer_matmul_with_zp(
         return quote! { (#lhs).matmul(#rhs) };
     }
 
-    let k_lhs = aligned_rank.saturating_sub(1);
-    let k_rhs = if aligned_rank >= 2 {
-        aligned_rank - 2
-    } else {
-        0
-    };
-
-    // Every consuming use clones the source identifier. zp correction mentions
-    // lhs/rhs/za/zb more than once; without this the generated model hits
-    // use-after-move (e5 has 96 MatMulInteger nodes, almost all with zp).
-    let zp_expr = |zp: &TokenStream| {
-        if aligned_rank > 1 {
-            quote! { (#zp).clone().cast(#output_dtype).unsqueeze::<#aligned_rank>() }
-        } else {
-            quote! { (#zp).clone().cast(#output_dtype) }
+    let zp_arg = |zp: Option<&TokenStream>| match zp {
+        None => quote! { None },
+        Some(zp) if aligned_rank > 1 => {
+            quote! { Some((#zp).clone().cast(#output_dtype).unsqueeze::<#aligned_rank>()) }
         }
+        Some(zp) => quote! { Some((#zp).clone().cast(#output_dtype)) },
     };
-
-    let mut prod = quote! { (#lhs).clone().matmul((#rhs).clone()) };
-
-    if let Some(zp) = zp_a {
-        let za = zp_expr(zp);
-        prod = quote! {
-            #prod.sub((#za).mul((#rhs).clone().cast(#output_dtype).sum_dim(#k_rhs)))
-        };
-    }
-    if let Some(zp) = zp_b {
-        let zb = zp_expr(zp);
-        prod = quote! {
-            #prod.sub((#lhs).clone().cast(#output_dtype).sum_dim(#k_lhs).mul(#zb))
-        };
-    }
-    if let (Some(za_src), Some(zb_src)) = (zp_a, zp_b) {
-        let za = zp_expr(za_src);
-        let zb = zp_expr(zb_src);
-        prod = quote! {
-            #prod.add((#za).mul(#zb).mul_scalar((#lhs).dims()[#k_lhs] as i32))
-        };
-    }
-    prod
+    let za = zp_arg(zp_a);
+    let zb = zp_arg(zp_b);
+    quote! { (#lhs).matmul_integer(#rhs, #za, #zb) }
 }
 
 #[cfg(test)]
@@ -239,33 +211,20 @@ mod tests {
             b_zero_point: Tensor<2, Int>,
         ) -> Tensor<2, Int> {
             let output = (a)
-                .clone()
-                .matmul((b).clone())
-                .sub(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32).unsqueeze::<2usize>())
-                        .mul((b).clone().cast(burn::tensor::DType::I32).sum_dim(0usize)),
-                )
-                .sub(
-                    (a)
-                        .clone()
-                        .cast(burn::tensor::DType::I32)
-                        .sum_dim(1usize)
-                        .mul(
-                            (b_zero_point)
-                                .clone()
-                                .cast(burn::tensor::DType::I32)
-                                .unsqueeze::<2usize>(),
-                        ),
-                )
-                .add(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32).unsqueeze::<2usize>())
-                        .mul(
-                            (b_zero_point)
-                                .clone()
-                                .cast(burn::tensor::DType::I32)
-                                .unsqueeze::<2usize>(),
-                        )
-                        .mul_scalar((a).dims()[1usize] as i32),
+                .matmul_integer(
+                    b,
+                    Some(
+                        (a_zero_point)
+                            .clone()
+                            .cast(burn::tensor::DType::I32)
+                            .unsqueeze::<2usize>(),
+                    ),
+                    Some(
+                        (b_zero_point)
+                            .clone()
+                            .cast(burn::tensor::DType::I32)
+                            .unsqueeze::<2usize>(),
+                    ),
                 );
             output
         }
@@ -289,11 +248,15 @@ mod tests {
             a_zero_point: Tensor<2, Int>,
         ) -> Tensor<2, Int> {
             let output = (a)
-                .clone()
-                .matmul((b).clone())
-                .sub(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32).unsqueeze::<2usize>())
-                        .mul((b).clone().cast(burn::tensor::DType::I32).sum_dim(0usize)),
+                .matmul_integer(
+                    b,
+                    Some(
+                        (a_zero_point)
+                            .clone()
+                            .cast(burn::tensor::DType::I32)
+                            .unsqueeze::<2usize>(),
+                    ),
+                    None,
                 );
             output
         }
@@ -319,38 +282,20 @@ mod tests {
             b_zero_point: Tensor<1, Int>,
         ) -> Tensor<3, Int> {
             let output = (a)
-                .clone()
-                .matmul(((b).clone().unsqueeze::<3usize>()).clone())
-                .sub(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32).unsqueeze::<3usize>())
-                        .mul(
-                            ((b).clone().unsqueeze::<3usize>())
-                                .clone()
-                                .cast(burn::tensor::DType::I32)
-                                .sum_dim(1usize),
-                        ),
-                )
-                .sub(
-                    (a)
-                        .clone()
-                        .cast(burn::tensor::DType::I32)
-                        .sum_dim(2usize)
-                        .mul(
-                            (b_zero_point)
-                                .clone()
-                                .cast(burn::tensor::DType::I32)
-                                .unsqueeze::<3usize>(),
-                        ),
-                )
-                .add(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32).unsqueeze::<3usize>())
-                        .mul(
-                            (b_zero_point)
-                                .clone()
-                                .cast(burn::tensor::DType::I32)
-                                .unsqueeze::<3usize>(),
-                        )
-                        .mul_scalar((a).dims()[2usize] as i32),
+                .matmul_integer(
+                    (b).clone().unsqueeze::<3usize>(),
+                    Some(
+                        (a_zero_point)
+                            .clone()
+                            .cast(burn::tensor::DType::I32)
+                            .unsqueeze::<3usize>(),
+                    ),
+                    Some(
+                        (b_zero_point)
+                            .clone()
+                            .cast(burn::tensor::DType::I32)
+                            .unsqueeze::<3usize>(),
+                    ),
                 );
             output
         }
@@ -459,23 +404,10 @@ mod tests {
             b_zero_point: Tensor<1, Int>,
         ) -> Tensor<1, Int> {
             let output = (a)
-                .clone()
-                .matmul((b).clone())
-                .sub(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32))
-                        .mul((b).clone().cast(burn::tensor::DType::I32).sum_dim(0usize)),
-                )
-                .sub(
-                    (a)
-                        .clone()
-                        .cast(burn::tensor::DType::I32)
-                        .sum_dim(0usize)
-                        .mul((b_zero_point).clone().cast(burn::tensor::DType::I32)),
-                )
-                .add(
-                    ((a_zero_point).clone().cast(burn::tensor::DType::I32))
-                        .mul((b_zero_point).clone().cast(burn::tensor::DType::I32))
-                        .mul_scalar((a).dims()[0usize] as i32),
+                .matmul_integer(
+                    b,
+                    Some((a_zero_point).clone().cast(burn::tensor::DType::I32)),
+                    Some((b_zero_point).clone().cast(burn::tensor::DType::I32)),
                 );
             output
         }
