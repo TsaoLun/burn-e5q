@@ -4064,6 +4064,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ort",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
