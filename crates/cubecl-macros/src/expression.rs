@@ -1,0 +1,466 @@
+use proc_macro2::{Span, TokenStream};
+use quote::{ToTokens, quote};
+use syn::{
+    AngleBracketedGenericArguments, Ident, Lit, LitStr, Member, Pat, Path, PathArguments,
+    PathSegment, QSelf, Token, Type,
+};
+
+use crate::{
+    operator::Operator,
+    parse::asm::AsmExpression,
+    scope::{Context, ManagedVar, Scope},
+    statement::Statement,
+};
+
+#[derive(Clone, Debug)]
+pub enum Expression {
+    Binary {
+        left: Box<Expression>,
+        operator: Operator,
+        right: Box<Expression>,
+        span: Span,
+    },
+    Unary {
+        input: Box<Expression>,
+        operator: Operator,
+        span: Span,
+    },
+    Variable(ManagedVar),
+    FieldAccess {
+        base: Box<Expression>,
+        field: Member,
+    },
+    Path {
+        path: Path,
+        qself: Option<QSelf>,
+    },
+    Literal {
+        value: Lit,
+    },
+    Assignment {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    Unsafe(Token![unsafe], Block),
+    Block(Block),
+    FunctionCall {
+        func: Box<Expression>,
+        args: Vec<Expression>,
+        associated_type: Option<(Path, Option<QSelf>, PathSegment)>,
+        span: Span,
+    },
+    CompilerIntrinsic {
+        func: Path,
+        args: Vec<Expression>,
+    },
+    MethodCall {
+        receiver: Box<Expression>,
+        method: Ident,
+        generics: Option<AngleBracketedGenericArguments>,
+        args: Vec<Expression>,
+        span: Span,
+    },
+    Closure {
+        params: Vec<Pat>,
+        body: Box<Expression>,
+        scope: Scope,
+    },
+    Cast {
+        from: Box<Expression>,
+        to: Type,
+    },
+    Break,
+    /// Tokens not relevant to parsing
+    Verbatim {
+        tokens: TokenStream,
+    },
+    VerbatimTerminated {
+        tokens: TokenStream,
+    },
+    #[allow(clippy::enum_variant_names)]
+    ExpressionMacro {
+        ident: Ident,
+        args: Vec<Expression>,
+    },
+    RawMacro {
+        path: Path,
+        args: TokenStream,
+    },
+    Asm(AsmExpression),
+    Continue(Span),
+    Return(Span),
+    ForLoop {
+        range: Box<Expression>,
+        unroll: Option<Box<Expression>>,
+        var_name: syn::Ident,
+        var_ty: Option<syn::Type>,
+        block: Block,
+        scope: Scope,
+    },
+    WhileLoop {
+        cond: Box<Expression>,
+        cond_scope: Scope,
+        body: Block,
+        scope: Scope,
+    },
+    Loop {
+        block: Block,
+        scope: Scope,
+    },
+    If {
+        condition: Box<Expression>,
+        then_block: Block,
+        else_branch: Option<Box<Expression>>,
+    },
+    Switch {
+        value: Box<Expression>,
+        cases: Vec<(Expression, Block)>,
+        default: Block,
+    },
+    Range {
+        start: Option<Box<Expression>>,
+        end: Option<Box<Expression>>,
+        span: Span,
+        inclusive: bool,
+    },
+    Array {
+        elements: Vec<Expression>,
+        span: Span,
+    },
+    Tuple {
+        elements: Vec<Expression>,
+    },
+    Index {
+        expr: Box<Expression>,
+        index: Box<Expression>,
+        span: Span,
+    },
+    IndexMut {
+        expr: Box<Expression>,
+        index: Box<Expression>,
+        span: Span,
+    },
+    ArrayInit {
+        init: Box<Expression>,
+        len: Box<Expression>,
+    },
+    Reference {
+        inner: Box<Expression>,
+    },
+    MutReference {
+        inner: Box<Expression>,
+    },
+    StructInit {
+        path: Path,
+        fields: Vec<(Member, Expression)>,
+    },
+    Keyword {
+        name: Ident,
+    },
+    RuntimeMatch {
+        expr: Box<Expression>,
+        arms: Vec<MatchArm>,
+        default: Option<MatchArm>,
+    },
+    Match {
+        // True implies that discriminants are matched at comptime,
+        // but the values of the variants are only known at runtime.
+        // False implies that both the discriminants and the variant's values are known at
+        // comptime.
+        runtime_variants: bool,
+        expr: Box<Expression>,
+        arms: Vec<MatchArm>,
+    },
+    RuntimeIfLet {
+        expr: Box<Expression>,
+        arm: MatchArm,
+        else_branch: Option<Box<Expression>>,
+    },
+    IfLet {
+        runtime_variants: bool,
+        expr: Box<Expression>,
+        arm: MatchArm,
+        else_branch: Option<Box<Expression>>,
+    },
+    Comment {
+        content: LitStr,
+    },
+    PanickingMacro {
+        ident: Ident,
+        tokens: TokenStream,
+    },
+    Terminate,
+    AssertConstant {
+        inner: Box<Expression>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchArm {
+    pub pat: Pat,
+    pub expr: Box<Expression>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Block {
+    pub inner: Vec<Statement>,
+    pub ret: Option<Box<Expression>>,
+}
+
+impl Expression {
+    pub fn is_const(&self) -> bool {
+        match self {
+            Expression::Literal { .. } => true,
+            Expression::Path { .. } => true,
+            Expression::Verbatim { .. } => true,
+            Expression::VerbatimTerminated { .. } => true,
+            Expression::Variable(var) => var.is_const,
+            Expression::FieldAccess { base, .. } => base.is_const(),
+            Expression::Reference { inner } => inner.is_const(),
+            Expression::Array { elements, .. } => elements.iter().all(|it| it.is_const()),
+            Expression::Tuple { elements, .. } => elements.iter().all(|it| it.is_const()),
+            Expression::CompilerIntrinsic { .. } => true,
+            Expression::Match { arms, .. } => arms.iter().all(|it| it.expr.is_const()),
+            Expression::AssertConstant { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether evaluating this expression has no observable effect. Used to skip
+    /// short-circuit codegen for `||`/`&&`. Conservative: anything not known to
+    /// be pure (function calls, indexing, ...) returns false.
+    pub fn is_always_pure(&self) -> bool {
+        match self {
+            Expression::Literal { .. } => true,
+            Expression::Path { .. } => true,
+            Expression::Variable(_) => true,
+            Expression::Keyword { .. } => true,
+            Expression::Binary { left, right, .. } => {
+                left.is_always_pure() && right.is_always_pure()
+            }
+            Expression::Unary { input, .. } => input.is_always_pure(),
+            Expression::Cast { from, .. } => from.is_always_pure(),
+            Expression::FieldAccess { base, .. } => base.is_always_pure(),
+            _ => false,
+        }
+    }
+
+    pub fn as_const_primitive(&self, _context: &mut Context) -> Option<TokenStream> {
+        match self {
+            Expression::Literal { value, .. } => match value {
+                Lit::Int(_) | Lit::Float(_) | Lit::Bool(_) => Some(quote![#value]),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn as_const(&self, context: &mut Context) -> Option<TokenStream> {
+        match self {
+            Expression::Literal { value, .. } => Some(quote![#value]),
+            Expression::Verbatim { tokens, .. } => Some(tokens.clone()),
+            Expression::VerbatimTerminated { tokens, .. } => Some(tokens.clone()),
+            Expression::Variable(ManagedVar {
+                name,
+                is_const: true,
+                ..
+            }) => Some(quote![#name]),
+            Expression::Path { path, .. } => Some(quote![#path]),
+            Expression::Array { elements, .. } => {
+                let elements = elements
+                    .iter()
+                    .map(|it| it.as_const(context))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(quote![[#(#elements),*]])
+            }
+            Expression::Tuple { elements, .. } => {
+                let elements = elements
+                    .iter()
+                    .map(|it| it.as_const(context))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(quote![(#(#elements,)*)])
+            }
+            Expression::FieldAccess { base, field, .. } => {
+                base.as_const(context).map(|base| quote![#base.#field])
+            }
+            Expression::Reference { inner } => inner.as_const(context).map(|base| quote![&#base]),
+            Expression::MutReference { inner } => {
+                inner.as_const(context).map(|base| quote![&mut #base])
+            }
+            Expression::MethodCall { .. } if self.is_const() => Some(self.to_tokens(context)),
+            Expression::Match { .. } if self.is_const() => Some(self.to_tokens(context)),
+            Expression::AssertConstant { inner } => Some(inner.to_tokens(context)),
+            _ => None,
+        }
+    }
+
+    pub fn needs_terminator(&self) -> bool {
+        match self {
+            Expression::If { then_block, .. } => then_block.ret.is_some(),
+            Expression::Block(block) => block.ret.is_some(),
+            Expression::ForLoop { .. } => false,
+            Expression::WhileLoop { .. } => false,
+            Expression::Loop { .. } => false,
+            Expression::VerbatimTerminated { .. } => false,
+            _ => true,
+        }
+    }
+}
+
+pub fn is_intrinsic(path: &Path) -> bool {
+    // Add both possible import paths
+    let intrinsic_paths = [
+        "::cubecl::prelude::vectorization_of",
+        "::cubecl::frontend::vectorization_of",
+    ];
+
+    let mut path = path.clone();
+    // Strip function generics
+    path.segments.last_mut().unwrap().arguments = PathArguments::None;
+    let func_path = path.to_token_stream().to_string();
+    intrinsic_paths
+        .iter()
+        .any(|path| path.ends_with(&func_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proc_macro2::Span;
+    use syn::parse_quote;
+
+    // Pure leaves.
+    fn lit() -> Expression {
+        Expression::Literal {
+            value: parse_quote!(1),
+        }
+    }
+    fn path() -> Expression {
+        Expression::Path {
+            path: parse_quote!(foo),
+            qself: None,
+        }
+    }
+    fn keyword() -> Expression {
+        Expression::Keyword {
+            name: parse_quote!(ABSOLUTE_POS),
+        }
+    }
+
+    // Impure leaves.
+    fn call() -> Expression {
+        Expression::FunctionCall {
+            func: Box::new(path()),
+            args: vec![],
+            associated_type: None,
+            span: Span::call_site(),
+        }
+    }
+    fn index(inner: Expression) -> Expression {
+        Expression::Index {
+            expr: Box::new(inner),
+            index: Box::new(lit()),
+            span: Span::call_site(),
+        }
+    }
+    fn method(receiver: Expression) -> Expression {
+        Expression::MethodCall {
+            receiver: Box::new(receiver),
+            method: parse_quote!(foo),
+            generics: None,
+            args: vec![],
+            span: Span::call_site(),
+        }
+    }
+
+    // Recursive nodes.
+    fn binary(left: Expression, right: Expression) -> Expression {
+        Expression::Binary {
+            left: Box::new(left),
+            operator: Operator::And,
+            right: Box::new(right),
+            span: Span::call_site(),
+        }
+    }
+    fn unary(input: Expression) -> Expression {
+        Expression::Unary {
+            input: Box::new(input),
+            operator: Operator::Not,
+            span: Span::call_site(),
+        }
+    }
+    fn cast(from: Expression) -> Expression {
+        Expression::Cast {
+            from: Box::new(from),
+            to: parse_quote!(u32),
+        }
+    }
+    fn field(base: Expression) -> Expression {
+        Expression::FieldAccess {
+            base: Box::new(base),
+            field: parse_quote!(x),
+        }
+    }
+
+    #[test]
+    fn pure_leaves_are_pure() {
+        assert!(lit().is_always_pure());
+        assert!(path().is_always_pure());
+        assert!(keyword().is_always_pure());
+    }
+
+    #[test]
+    fn effectful_leaves_are_impure() {
+        assert!(!call().is_always_pure());
+        assert!(!index(path()).is_always_pure());
+        assert!(!method(path()).is_always_pure());
+    }
+
+    #[test]
+    fn unary_cast_field_follow_their_operand() {
+        assert!(unary(lit()).is_always_pure());
+        assert!(!unary(call()).is_always_pure());
+
+        assert!(cast(path()).is_always_pure());
+        assert!(!cast(index(path())).is_always_pure());
+
+        assert!(field(path()).is_always_pure());
+        assert!(!field(call()).is_always_pure());
+    }
+
+    #[test]
+    fn binary_is_pure_only_when_both_operands_are() {
+        assert!(binary(lit(), path()).is_always_pure());
+        assert!(!binary(lit(), call()).is_always_pure());
+        assert!(!binary(call(), lit()).is_always_pure());
+        assert!(!binary(call(), index(path())).is_always_pure());
+    }
+
+    #[test]
+    fn impurity_propagates_through_nesting() {
+        // A deep tree of only pure nodes stays pure.
+        let pure = binary(binary(path(), lit()), unary(cast(field(path()))));
+        assert!(pure.is_always_pure());
+
+        // The same shape with one call buried in a leaf is impure.
+        let impure = binary(binary(path(), lit()), unary(cast(field(call()))));
+        assert!(!impure.is_always_pure());
+    }
+
+    #[test]
+    fn unhandled_variants_are_conservatively_impure() {
+        // Variants not enumerated are impure even with pure children.
+        assert!(
+            !Expression::Reference {
+                inner: Box::new(lit())
+            }
+            .is_always_pure()
+        );
+        assert!(
+            !Expression::Tuple {
+                elements: vec![lit(), path()]
+            }
+            .is_always_pure()
+        );
+    }
+}

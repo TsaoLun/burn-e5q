@@ -1,0 +1,47 @@
+use tracel_xtask::prelude::*;
+
+#[macros::extend_command_args(TestCmdArgs, Target, TestSubCommand)]
+pub struct CubeCLTestCmdArgs {
+    /// Build in CI mode which excludes unsupported crates.
+    #[arg(long)]
+    pub ci: bool,
+}
+
+pub(crate) fn handle_command(
+    mut args: CubeCLTestCmdArgs,
+    env: Environment,
+    context: Context,
+) -> anyhow::Result<()> {
+    if args.miri.is_some() {
+        // miri tests
+        args.target = Target::Crates;
+        args.only.extend(vec![
+            "cubecl-common".to_string(),
+            "cubecl-environment".to_string(),
+        ]);
+        base_commands::test::handle_command(args.try_into().unwrap(), env, context)?;
+    } else {
+        // conventional tests
+        if args.ci {
+            // Exclude crates that are not supported on CI
+            args.exclude.extend(vec![
+                "cubecl-cuda".to_string(),
+                "cubecl-hip".to_string(),
+                "cubecl-metal".to_string(),
+                // Weird symbol errors for LLVM, can't figure out how to deal with it rn
+                "cubecl-opt".to_string(),
+            ]);
+        }
+        base_commands::test::handle_command(args.try_into().unwrap(), env, context)?;
+        // Specific additional commands to test specific features
+        // cubecl-wgpu with exclusive-memory-only
+        build_helpers::custom_crates_tests(
+            vec!["cubecl-wgpu"],
+            vec!["--features", "exclusive-memory-only", "--lib"],
+            None,
+            None,
+            "std with exclusive_memory_only",
+        )?;
+    }
+    Ok(())
+}
