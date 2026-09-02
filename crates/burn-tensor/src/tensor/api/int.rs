@@ -3,7 +3,7 @@ use burn_dispatch::Dispatch;
 
 use crate::{
     Cast, Device, Float, Int, Shape, Tensor, TensorCreationOptions, TensorData, cartesian_grid,
-    ops::BridgeTensor,
+    check, check::TensorCheck, ops::BridgeTensor,
 };
 
 use core::ops::Range;
@@ -192,6 +192,30 @@ impl<const D: usize> Tensor<D, Int> {
     pub fn cast<T: Cast<D, Int>>(self, dtype: T) -> Tensor<D, T::OutputKind> {
         T::cast(self, dtype)
     }
+
+    /// Integer matrix product with ONNX MatMulInteger zero-points.
+    ///
+    /// Computes `(self − zp_lhs) @ (other − zp_rhs)` and accumulates in `i32`.
+    /// `zp_lhs` / `zp_rhs` must already be broadcast-aligned to rank `D`
+    /// (scalar zero-points should be `unsqueeze`d). `None` means zero.
+    ///
+    /// Backends with an 8-bit GEMM (flex VNNI, CubeCL CpuGemm) can fuse the
+    /// correction into the same kernel; others expand the algebraic identity.
+    #[must_use]
+    pub fn matmul_integer(
+        self,
+        other: Self,
+        zp_lhs: Option<Self>,
+        zp_rhs: Option<Self>,
+    ) -> Self {
+        check!(TensorCheck::matmul(&self, &other));
+        Tensor::new(matmul_integer_impl(
+            self.primitive,
+            other.primitive,
+            zp_lhs.map(|t| t.primitive),
+            zp_rhs.map(|t| t.primitive),
+        ))
+    }
 }
 
 // =========================================================================
@@ -260,4 +284,17 @@ fn bitwise_left_shift_scalar_impl(p: BridgeTensor, other: Scalar) -> BridgeTenso
 }
 fn bitwise_right_shift_scalar_impl(p: BridgeTensor, other: Scalar) -> BridgeTensor {
     BridgeTensor::int(Dispatch::bitwise_right_shift_scalar(p.into(), other))
+}
+fn matmul_integer_impl(
+    lhs: BridgeTensor,
+    rhs: BridgeTensor,
+    zp_lhs: Option<BridgeTensor>,
+    zp_rhs: Option<BridgeTensor>,
+) -> BridgeTensor {
+    BridgeTensor::int(Dispatch::int_matmul_integer(
+        lhs.into(),
+        rhs.into(),
+        zp_lhs.map(Into::into),
+        zp_rhs.map(Into::into),
+    ))
 }

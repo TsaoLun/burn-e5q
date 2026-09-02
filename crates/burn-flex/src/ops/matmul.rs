@@ -502,6 +502,33 @@ fn is_int8(dtype: DType) -> bool {
 
 /// Integer matrix multiplication dispatch.
 pub fn int_matmul(lhs: FlexTensor, rhs: FlexTensor) -> FlexTensor {
+    int_matmul_dispatch(lhs, rhs, &int_gemm::Zp::NONE)
+}
+
+/// Integer GEMM with fused ONNX MatMulInteger zero-points.
+///
+/// Falls back to the algebraic expansion when the zero-points are not a
+/// scalar / per-row `za` / per-col `zb` that broadcasts across the batch.
+pub fn int_matmul_integer(
+    lhs: FlexTensor,
+    rhs: FlexTensor,
+    zp_lhs: Option<FlexTensor>,
+    zp_rhs: Option<FlexTensor>,
+) -> FlexTensor {
+    if matches!((lhs.dtype(), rhs.dtype()), (DType::I64, DType::I64)) {
+        return burn_backend::ops::int_matmul_integer_algebraic::<crate::Flex>(
+            lhs, rhs, zp_lhs, zp_rhs,
+        );
+    }
+    match interpret_zp(&lhs, &rhs, zp_lhs.as_ref(), zp_rhs.as_ref()) {
+        Some(zp) => int_matmul_dispatch(lhs, rhs, &zp),
+        None => burn_backend::ops::int_matmul_integer_algebraic::<crate::Flex>(
+            lhs, rhs, zp_lhs, zp_rhs,
+        ),
+    }
+}
+
+fn int_matmul_dispatch(lhs: FlexTensor, rhs: FlexTensor, zp: &int_gemm::Zp) -> FlexTensor {
     let lhs_shape = lhs.layout().shape();
     let rhs_shape = rhs.layout().shape();
     let lhs_rank = lhs_shape.num_dims();
@@ -515,36 +542,108 @@ pub fn int_matmul(lhs: FlexTensor, rhs: FlexTensor) -> FlexTensor {
     assert_eq!(k_lhs, k_rhs, "int_matmul: inner dimensions must match");
 
     match (lhs.dtype(), rhs.dtype()) {
-        (DType::I32, DType::I32) => matmul_acc_i32(lhs, rhs),
+        (DType::I32, DType::I32) => matmul_acc_i32(lhs, rhs, zp),
         (DType::I64, DType::I64) => matmul_i64(lhs, rhs),
-        (ld, rd) if is_int8(ld) && is_int8(rd) => matmul_int8(lhs, rhs),
+        (ld, rd) if is_int8(ld) && is_int8(rd) => matmul_int8(lhs, rhs, zp),
         (ld, rd) => panic!("int_matmul: unsupported dtypes {ld:?} x {rd:?}"),
     }
 }
 
-fn matmul_acc_i32(lhs: FlexTensor, rhs: FlexTensor) -> FlexTensor {
+/// Classify zp tensors as scalar / per-row / per-col. `None` means "too
+/// irregular — use the algebraic fallback". Leading size-1 dims (batch
+/// broadcast after `unsqueeze`) are allowed.
+fn interpret_zp(
+    lhs: &FlexTensor,
+    rhs: &FlexTensor,
+    zp_lhs: Option<&FlexTensor>,
+    zp_rhs: Option<&FlexTensor>,
+) -> Option<int_gemm::Zp> {
+    let (m, n, _k, _, _) = mnk(lhs, rhs);
+    let za = match zp_lhs {
+        None => int_gemm::ZpLane::Zero,
+        Some(t) => classify_zp(t, m, n, true)?,
+    };
+    let zb = match zp_rhs {
+        None => int_gemm::ZpLane::Zero,
+        Some(t) => classify_zp(t, m, n, false)?,
+    };
+    Some(int_gemm::Zp { za, zb })
+}
+
+fn classify_zp(t: &FlexTensor, m: usize, n: usize, for_a: bool) -> Option<int_gemm::ZpLane> {
+    let t = t.to_contiguous();
+    let vals = zp_values_i32(&t);
+    if vals.is_empty() {
+        return Some(int_gemm::ZpLane::Zero);
+    }
+    if vals.len() == 1 || vals.iter().all(|&x| x == vals[0]) {
+        return Some(int_gemm::ZpLane::Scalar(vals[0]));
+    }
+    let shape = t.layout().shape();
+    let rank = shape.num_dims();
+    if for_a {
+        // [..., M, 1] or [..., M] with leading 1s
+        if rank >= 2 && shape[rank - 1] == 1 && shape[rank - 2] == m {
+            if (0..rank - 2).all(|i| shape[i] == 1) && vals.len() == m {
+                return Some(int_gemm::ZpLane::Per(vals));
+            }
+        }
+        if rank >= 1 && shape[rank - 1] == m && (0..rank - 1).all(|i| shape[i] == 1) && vals.len() == m
+        {
+            return Some(int_gemm::ZpLane::Per(vals));
+        }
+    } else {
+        // [..., 1, N] or [..., N] with leading 1s
+        if rank >= 2 && shape[rank - 1] == n && shape[rank - 2] == 1 {
+            if (0..rank - 2).all(|i| shape[i] == 1) && vals.len() == n {
+                return Some(int_gemm::ZpLane::Per(vals));
+            }
+        }
+        if rank >= 1 && shape[rank - 1] == n && (0..rank - 1).all(|i| shape[i] == 1) && vals.len() == n
+        {
+            return Some(int_gemm::ZpLane::Per(vals));
+        }
+    }
+    None
+}
+
+fn zp_values_i32(t: &FlexTensor) -> Vec<i32> {
+    match t.dtype() {
+        DType::I32 => t.storage::<i32>().to_vec(),
+        DType::I8 => t.storage::<i8>().iter().copied().map(i32::from).collect(),
+        DType::U8 => t.storage::<u8>().iter().copied().map(i32::from).collect(),
+        DType::I16 => t.storage::<i16>().iter().copied().map(i32::from).collect(),
+        DType::U16 => t.storage::<u16>().iter().copied().map(i32::from).collect(),
+        DType::I64 => t.storage::<i64>().iter().map(|&x| x as i32).collect(),
+        DType::U32 => t.storage::<u32>().iter().map(|&x| x as i32).collect(),
+        other => panic!("int_matmul_integer: unsupported zp dtype {other:?}"),
+    }
+}
+
+fn matmul_acc_i32(lhs: FlexTensor, rhs: FlexTensor, zp: &int_gemm::Zp) -> FlexTensor {
     let lhs = lhs.to_contiguous();
     let rhs = rhs.to_contiguous();
     let (m, n, k, lhs_rank, rhs_rank) = mnk(&lhs, &rhs);
     if lhs_rank == 2 && rhs_rank == 2 {
-        let out = int_gemm::gemm::<i32, i32>(lhs.storage(), rhs.storage(), m, n, k);
+        let out = int_gemm::gemm_with_zp::<i32, i32>(lhs.storage(), rhs.storage(), m, n, k, zp);
         return i32_tensor(out, vec![m, n]);
     }
-    matmul_batched_acc(&lhs, &rhs, |a, b| int_gemm::gemm::<i32, i32>(a, b, m, n, k))
+    matmul_batched_acc(&lhs, &rhs, |a, b| {
+        int_gemm::gemm_with_zp::<i32, i32>(a, b, m, n, k, zp)
+    })
 }
 
-fn matmul_int8(lhs: FlexTensor, rhs: FlexTensor) -> FlexTensor {
+fn matmul_int8(lhs: FlexTensor, rhs: FlexTensor, zp: &int_gemm::Zp) -> FlexTensor {
     let lhs = lhs.to_contiguous();
     let rhs = rhs.to_contiguous();
     let (m, n, k, lhs_rank, rhs_rank) = mnk(&lhs, &rhs);
-    let out = match (lhs.dtype(), rhs.dtype()) {
-        (DType::U8, DType::U8) => finish_int8::<u8, u8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank),
-        (DType::U8, DType::I8) => finish_int8::<u8, i8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank),
-        (DType::I8, DType::U8) => finish_int8::<i8, u8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank),
-        (DType::I8, DType::I8) => finish_int8::<i8, i8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank),
+    match (lhs.dtype(), rhs.dtype()) {
+        (DType::U8, DType::U8) => finish_int8::<u8, u8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank, zp),
+        (DType::U8, DType::I8) => finish_int8::<u8, i8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank, zp),
+        (DType::I8, DType::U8) => finish_int8::<i8, u8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank, zp),
+        (DType::I8, DType::I8) => finish_int8::<i8, i8>(&lhs, &rhs, m, n, k, lhs_rank, rhs_rank, zp),
         (ld, rd) => panic!("matmul_int8: {ld:?} x {rd:?}"),
-    };
-    out
+    }
 }
 
 fn finish_int8<A, B>(
@@ -555,16 +654,19 @@ fn finish_int8<A, B>(
     k: usize,
     lhs_rank: usize,
     rhs_rank: usize,
+    zp: &int_gemm::Zp,
 ) -> FlexTensor
 where
-    A: int_gemm::AsAcc + Sync + bytemuck::Pod + Element,
-    B: int_gemm::AsAcc + Sync + bytemuck::Pod + Element,
+    A: int_gemm::AsAcc + Sync + Send + bytemuck::Pod + Element + 'static,
+    B: int_gemm::AsAcc + Sync + Send + bytemuck::Pod + Element + 'static,
 {
     if lhs_rank == 2 && rhs_rank == 2 {
-        let out = int_gemm::gemm::<A, B>(lhs.storage(), rhs.storage(), m, n, k);
+        let out = int_gemm::gemm_with_zp::<A, B>(lhs.storage(), rhs.storage(), m, n, k, zp);
         return i32_tensor(out, vec![m, n]);
     }
-    matmul_batched_acc(lhs, rhs, |a, b| int_gemm::gemm::<A, B>(a, b, m, n, k))
+    matmul_batched_acc(lhs, rhs, |a, b| {
+        int_gemm::gemm_with_zp::<A, B>(a, b, m, n, k, zp)
+    })
 }
 
 fn mnk(lhs: &FlexTensor, rhs: &FlexTensor) -> (usize, usize, usize, usize, usize) {
@@ -591,8 +693,8 @@ fn i32_tensor(data: Vec<i32>, dims: Vec<usize>) -> FlexTensor {
 /// batch axis and each pair stays serial to avoid nested work-stealing.
 fn matmul_batched_acc<A, B, F>(lhs: &FlexTensor, rhs: &FlexTensor, kernel: F) -> FlexTensor
 where
-    A: int_gemm::AsAcc + Sync + bytemuck::Pod + Element,
-    B: int_gemm::AsAcc + Sync + bytemuck::Pod + Element,
+    A: int_gemm::AsAcc + Sync + Send + bytemuck::Pod + Element + 'static,
+    B: int_gemm::AsAcc + Sync + Send + bytemuck::Pod + Element + 'static,
     F: Fn(&[A], &[B]) -> Vec<i32> + Sync,
 {
     let lhs_shape = lhs.layout().shape();
@@ -968,6 +1070,21 @@ mod tests {
         let ref_i = Flex::int_matmul(lhs_i, rhs_i);
         let a: Vec<i32> = got.into_data().try_into_vec().unwrap();
         let b: Vec<i32> = ref_i.into_data().try_into_vec().unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_int_matmul_integer_scalar_zp() {
+        let lhs = FlexTensor::from_data(TensorData::new(vec![10u8, 20, 30, 40], [2, 2]));
+        let rhs = FlexTensor::from_data(TensorData::new(vec![5i8, 6, 7, 8], [2, 2]));
+        let za = FlexTensor::from_data(TensorData::new(vec![2i32], [1, 1]));
+        let zb = FlexTensor::from_data(TensorData::new(vec![1i32], [1, 1]));
+        let fused =
+            Flex::int_matmul_integer(lhs.clone(), rhs.clone(), Some(za.clone()), Some(zb.clone()));
+        let algebraic =
+            burn_backend::ops::int_matmul_integer_algebraic::<Flex>(lhs, rhs, Some(za), Some(zb));
+        let a: Vec<i32> = fused.into_data().try_into_vec().unwrap();
+        let b: Vec<i32> = algebraic.into_data().try_into_vec().unwrap();
         assert_eq!(a, b);
     }
 }

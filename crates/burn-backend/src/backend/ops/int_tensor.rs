@@ -9,6 +9,46 @@ use burn_std::reader::try_read_sync;
 use burn_std::{BoolDType, FloatDType, IndexingUpdateOp, IntDType, PadMode, Shape, Slice};
 use core::ops::Range;
 
+/// Algebraic ONNX MatMulInteger: `(A − za) @ (B − zb)`.
+///
+/// Used by the default [`IntTensorOps::int_matmul_integer`] and as a fallback
+/// when a backend cannot fuse the zero-points into GEMM.
+pub fn int_matmul_integer_algebraic<B: Backend>(
+    lhs: IntTensor<B>,
+    rhs: IntTensor<B>,
+    zp_lhs: Option<IntTensor<B>>,
+    zp_rhs: Option<IntTensor<B>>,
+) -> IntTensor<B> {
+    if zp_lhs.is_none() && zp_rhs.is_none() {
+        return B::int_matmul(lhs, rhs);
+    }
+
+    let rank = lhs.shape().num_dims();
+    let k_lhs = rank.saturating_sub(1);
+    let k_rhs = rank.saturating_sub(2);
+    let k = lhs.shape()[k_lhs] as i32;
+
+    let mut prod = B::int_matmul(lhs.clone(), rhs.clone());
+
+    if let Some(za) = zp_lhs.clone() {
+        let za = B::int_cast(za, IntDType::I32);
+        let sum_b = B::int_sum_dim(B::int_cast(rhs.clone(), IntDType::I32), k_rhs);
+        prod = B::int_sub(prod, B::int_mul(za, sum_b));
+    }
+    if let Some(zb) = zp_rhs.clone() {
+        let zb = B::int_cast(zb, IntDType::I32);
+        let sum_a = B::int_sum_dim(B::int_cast(lhs.clone(), IntDType::I32), k_lhs);
+        prod = B::int_sub(prod, B::int_mul(sum_a, zb));
+    }
+    if let (Some(za), Some(zb)) = (zp_lhs, zp_rhs) {
+        let za = B::int_cast(za, IntDType::I32);
+        let zb = B::int_cast(zb, IntDType::I32);
+        let corr = B::int_mul_scalar(B::int_mul(za, zb), k.into());
+        prod = B::int_add(prod, corr);
+    }
+    prod
+}
+
 /// Int Tensor API for basic and numeric operations, see
 #[cfg_attr(doc, doc = crate::doc_tensor!())]
 #[cfg_attr(not(doc), doc = "`Tensor`")]
@@ -731,6 +771,27 @@ pub trait IntTensorOps<B: Backend> {
     ///
     /// The result of multiplying the two tensors together using matrix multiplication.
     fn int_matmul(lhs: IntTensor<B>, rhs: IntTensor<B>) -> IntTensor<B>;
+
+    /// Integer matrix product with ONNX [`MatMulInteger`] zero-points.
+    ///
+    /// Computes `(lhs − zp_lhs) @ (rhs − zp_rhs)` and accumulates in `i32`.
+    /// `zp_lhs` / `zp_rhs` must already be broadcast-aligned to `lhs`/`rhs`
+    /// (scalar zero-points should be unsqueezed). `None` means a zero point of 0.
+    ///
+    /// The default implementation expands the algebraic identity
+    /// `A@B − za·sum_k(B) − sum_k(A)·zb + K·za·zb` on top of [`int_matmul`].
+    /// Backends with an 8-bit GEMM should override this to fold the correction
+    /// into the same kernel.
+    ///
+    /// [`MatMulInteger`]: https://onnx.ai/onnx/operators/onnx__MatMulInteger.html
+    fn int_matmul_integer(
+        lhs: IntTensor<B>,
+        rhs: IntTensor<B>,
+        zp_lhs: Option<IntTensor<B>>,
+        zp_rhs: Option<IntTensor<B>>,
+    ) -> IntTensor<B> {
+        int_matmul_integer_algebraic::<B>(lhs, rhs, zp_lhs, zp_rhs)
+    }
 
     /// Element-wise negation.
     ///

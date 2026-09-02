@@ -252,6 +252,20 @@ impl IntTensorOps<Self> for Dispatch {
         binary_op!((lhs, int), (rhs, int), |lhs, rhs| B::int_matmul(lhs, rhs) => Int)
     }
 
+    fn int_matmul_integer(
+        lhs: IntTensor<Self>,
+        rhs: IntTensor<Self>,
+        zp_lhs: Option<IntTensor<Self>>,
+        zp_rhs: Option<IntTensor<Self>>,
+    ) -> IntTensor<Self> {
+        multi_op!(
+            inputs[(lhs, int), (rhs, int)],
+            opt_inputs[(zp_lhs, int), (zp_rhs, int)],
+            => Int,
+            B::int_matmul_integer(lhs, rhs, zp_lhs, zp_rhs)
+        )
+    }
+
     fn int_sum(tensor: IntTensor<Self>) -> IntTensor<Self> {
         unary_op!(tensor, int, |tensor| B::int_sum(tensor) => Int)
     }

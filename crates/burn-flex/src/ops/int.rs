@@ -663,6 +663,15 @@ impl IntTensorOps<Flex> for Flex {
         matmul::int_matmul(lhs, rhs)
     }
 
+    fn int_matmul_integer(
+        lhs: IntTensor<Flex>,
+        rhs: IntTensor<Flex>,
+        zp_lhs: Option<IntTensor<Flex>>,
+        zp_rhs: Option<IntTensor<Flex>>,
+    ) -> IntTensor<Flex> {
+        matmul::int_matmul_integer(lhs, rhs, zp_lhs, zp_rhs)
+    }
+
     fn int_sum(tensor: IntTensor<Flex>) -> IntTensor<Flex> {
         crate::ops::reduce::sum(tensor)
     }
