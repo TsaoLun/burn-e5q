@@ -8,12 +8,13 @@
 //! Compare the whole process against ONNX Runtime with
 //! `python3 crates/e5-embed/scripts/ort_mem.py` (and `--arena`).
 
-use e5_embed::{E5Embedder, current_hwm_mb, current_rss_mb, default_model_dir};
+use e5_embed::{E5Embedder, current_rss_hwm_mb, default_model_dir};
 
 fn rss_line(label: &str) {
-    match current_hwm_mb() {
-        Some(hwm) => println!("{label}: {:.1} MB  HWM {:.1} MB", current_rss_mb(), hwm),
-        None => println!("{label}: {:.1} MB", current_rss_mb()),
+    let (rss, hwm) = current_rss_hwm_mb();
+    match hwm {
+        Some(hwm) => println!("{label}: {rss:.1} MB  HWM {hwm:.1} MB"),
+        None => println!("{label}: {rss:.1} MB"),
     }
 }
 
@@ -29,12 +30,12 @@ fn main() -> anyhow::Result<()> {
 
     rss_line("RSS at start");
     let device = burn::prelude::Device::default();
-    let embedder = E5Embedder::load(&default_model_dir(), &device)?
-        .with_max_batch_tokens(budget);
+    let embedder = E5Embedder::load(&default_model_dir(), &device)?.with_max_batch_tokens(budget);
     rss_line("RSS after model load");
 
     // Largest forward the budget allows: (budget/512) rows × ~512 tokens.
-    let long_text: String = "Night ride along the riverside with friends. 周末滨江夜骑。 ".repeat(55);
+    let long_text: String =
+        "Night ride along the riverside with friends. 周末滨江夜骑。 ".repeat(55);
     let rows = (budget / 512).max(1);
     let texts: Vec<&str> = std::iter::repeat_n(long_text.as_str(), rows).collect();
     let probe = embedder.encode_prefixed("passage: ", &long_text)?;
@@ -44,12 +45,16 @@ fn main() -> anyhow::Result<()> {
     );
 
     let mut peak = 0.0f64;
+    let mut peak_hwm = 0.0f64;
     for round in 0..rounds {
         let t = std::time::Instant::now();
         let out = embedder.embed_passages(&texts)?;
-        let rss = current_rss_mb();
+        let (rss, hwm) = current_rss_hwm_mb();
         peak = peak.max(rss);
-        match current_hwm_mb() {
+        if let Some(h) = hwm {
+            peak_hwm = peak_hwm.max(h);
+        }
+        match hwm {
             Some(hwm) => println!(
                 "round {round:2}: {:8.1} ms, RSS {rss:7.1} MB  HWM {hwm:7.1} MB ({} vectors)",
                 t.elapsed().as_secs_f64() * 1e3,
@@ -63,8 +68,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
     println!("\npeak observed RSS: {peak:.1} MB (container budget: 512 MB)");
-    if let Some(hwm) = current_hwm_mb() {
-        println!("kernel peak HWM:    {hwm:.1} MB");
+    if peak_hwm > 0.0 {
+        println!("kernel peak HWM:    {peak_hwm:.1} MB");
     }
     println!(
         "verdict: {}",

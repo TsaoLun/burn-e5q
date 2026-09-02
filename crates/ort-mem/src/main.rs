@@ -16,30 +16,42 @@ use ort::ep::CPU;
 use ort::session::Session;
 use ort::value::Tensor;
 
-fn proc_status_kb(key: &str) -> Option<f64> {
-    let text = std::fs::read_to_string("/proc/self/status").ok()?;
-    let prefix = format!("{key}:");
-    for line in text.lines() {
-        let Some(rest) = line.strip_prefix(&prefix) else {
-            continue;
-        };
-        return rest.split_whitespace().next()?.parse().ok();
+/// `ort::Error<SessionBuilder>` is not `Send`, so it cannot go through `anyhow::Error` via `?`.
+fn o<T>(r: Result<T, impl std::fmt::Display>) -> anyhow::Result<T> {
+    r.map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn rss_hwm() -> (f64, Option<f64>) {
+    let text = std::fs::read_to_string("/proc/self/status").ok();
+    let mut rss = 0.0;
+    let mut hwm = None;
+    if let Some(text) = text {
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                if let Some(kb) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
+                    rss = kb / 1024.0;
+                }
+            } else if let Some(rest) = line.strip_prefix("VmHWM:") {
+                hwm = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|kb| kb / 1024.0);
+            }
+        }
     }
-    None
-}
-
-fn rss_mb() -> f64 {
-    proc_status_kb("VmRSS").unwrap_or(0.0) / 1024.0
-}
-
-fn hwm_mb() -> Option<f64> {
-    proc_status_kb("VmHWM").map(|kb| kb / 1024.0)
+    (rss, hwm)
 }
 
 fn log(label: &str) {
-    match hwm_mb() {
-        Some(hwm) => println!("{label:28}  RSS {:7.1} MB   HWM {hwm:7.1} MB", rss_mb()),
-        None => println!("{label:28}  RSS {:7.1} MB", rss_mb()),
+    let (rss, hwm) = rss_hwm();
+    match hwm {
+        Some(hwm) => println!("{label:28}  RSS {rss:7.1} MB   HWM {hwm:7.1} MB"),
+        None => println!("{label:28}  RSS {rss:7.1} MB"),
     }
 }
 
@@ -65,10 +77,10 @@ fn make_ids(rows: usize, seq: usize) -> Vec<i64> {
 
 fn run_forward(session: &mut Session, rows: usize, seq: usize) -> anyhow::Result<()> {
     let n = rows * seq;
-    let ids = Tensor::from_array(([rows, seq], make_ids(rows, seq)))
-        .context("input_ids tensor")?;
+    let ids = Tensor::from_array(([rows, seq], make_ids(rows, seq))).context("input_ids tensor")?;
     let attn = Tensor::from_array(([rows, seq], vec![1i64; n])).context("attention_mask tensor")?;
-    let ttype = Tensor::from_array(([rows, seq], vec![0i64; n])).context("token_type_ids tensor")?;
+    let ttype =
+        Tensor::from_array(([rows, seq], vec![0i64; n])).context("token_type_ids tensor")?;
     let _outputs = session
         .run(ort::inputs![
             "input_ids" => ids,
@@ -116,17 +128,16 @@ fn main() -> anyhow::Result<()> {
 
     log("native start");
 
-    let mut builder = Session::builder()?
-        .with_intra_threads(4)?
-        .with_inter_threads(1)?
-        .with_memory_pattern(arena)?;
-    builder = builder.with_execution_providers([CPU::default()
-        .with_arena_allocator(arena)
-        .build()])?;
+    let builder = o(Session::builder())?;
+    let builder = o(builder.with_intra_threads(4))?;
+    let builder = o(builder.with_inter_threads(1))?;
+    let builder = o(builder.with_memory_pattern(arena))?;
+    let mut builder =
+        o(builder.with_execution_providers([CPU::default().with_arena_allocator(arena).build()]))?;
 
     log("after Session::builder");
     let t0 = Instant::now();
-    let mut session = builder.commit_from_file(&model)?;
+    let mut session = o(builder.commit_from_file(&model))?;
     println!(
         "session loaded in {:.0} ms  arena={}  onnx file {:.1} MB  {}",
         t0.elapsed().as_secs_f64() * 1e3,
@@ -146,16 +157,23 @@ fn main() -> anyhow::Result<()> {
 
     let t0 = Instant::now();
     run_forward(&mut session, 1, 512)?;
-    println!("single 512 tok: {:8.1} ms", t0.elapsed().as_secs_f64() * 1e3);
+    println!(
+        "single 512 tok: {:8.1} ms",
+        t0.elapsed().as_secs_f64() * 1e3
+    );
     log("after 512-tok forward");
 
     let mut peak = 0.0f64;
+    let mut peak_hwm = 0.0f64;
     for round in 0..rounds {
         let t0 = Instant::now();
         run_forward(&mut session, rows, 512)?;
-        let rss = rss_mb();
+        let (rss, hwm) = rss_hwm();
         peak = peak.max(rss);
-        match hwm_mb() {
+        if let Some(h) = hwm {
+            peak_hwm = peak_hwm.max(h);
+        }
+        match hwm {
             Some(hwm) => println!(
                 "round {round:2}: {:8.1} ms, RSS {rss:7.1} MB  HWM {hwm:7.1} MB",
                 t0.elapsed().as_secs_f64() * 1e3
@@ -167,8 +185,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
     println!("\npeak observed RSS: {peak:.1} MB (container budget: 512 MB)");
-    if let Some(hwm) = hwm_mb() {
-        println!("kernel peak HWM:    {hwm:.1} MB");
+    if peak_hwm > 0.0 {
+        println!("kernel peak HWM:    {peak_hwm:.1} MB");
     }
     println!(
         "verdict: {}",

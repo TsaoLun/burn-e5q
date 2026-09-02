@@ -222,7 +222,7 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 > 日期：2026-09-02。同一台 4 核 Xeon（`avx512_vnni`）。
 > 栈：`vendor/burn-route-int8-matmul` `2d1084f` + `vendor/burn-onnx-keep-int8-matmul` `7cc2d36`。
-> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`；`cargo run --release -p ort-mem -- -- 5 2048`；`python3 crates/e5-embed/scripts/ort_mem.py`。
 > 实现：`notes/flex-dql.md`。
 
 ## TL;DR
@@ -238,7 +238,7 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 | 512 tok | **1272 ms**（1458 → **1.15×**） | ✅ |
 | vs Mac ort | 短 **7.0×**，512 **6.3×** | 仍未达 ~2× |
 | vs 本机 AMX ort | 短 ~8.7×，512 ~25× | softmax/LN/eager 仍在 |
-| 内存 | 加载 87.5 MB；`mem_stress 2048` **214 MB** | ✅ 与 VNNI 同量级 |
+| 内存 | 4×512 稳态 **213 MB** / HWM **315**；生产 ORT native arena off **162 / 268** | ✅ 进 512 MB；比整进程 ORT 大约 +51 MB RSS |
 
 `dql-poc` 官方输入：`y_scale=0.019607844`，`zp=153`，`y` 以 `[153, 255, 0, …]` 开头。
 
@@ -258,17 +258,35 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 | 8 条（598 tok） | **1.13** | **85** | 68 | 5.67 | 15.1 |
 | 512 tok | **0.79** | **403** | 351 | 4.98 | 20.0 |
 
-## 内存
+## 内存：burn vs 整进程 ORT
 
-| 阶段 | VNNI+zp | **融 DQL** |
-|---|---:|---:|
-| 启动（compare_ort） | — | 3.2 MB |
-| 模型加载 | 88 MB | **87.5 MB** |
-| compare_ort 全流程后 | — | 236 MB |
-| `mem_stress -- 5 2048` 峰值 | 215 MB | **213.6 MB** |
-| 4×512 稳态 | ~6.4 s | **~5.6 s** |
+口径：同一台 4 核 Xeon、同一份 `model_qint8_avx512_vnni.onnx`（磁盘 112.9 MB）、同一形状（`mem_stress -- 5 2048` = 4×512，5 轮）。数字是 **进程 VmRSS / VmHWM**，不是权重文件大小。
 
-DQL 中间张量少了约 10 趟，但 attention `[12,S,S]` 的 softmax/f32 激活仍在，峰值几乎不变。稳态变快是因为每层 DQL 不再走多趟 clone。
+- **生产对照**：`cargo run --release -p ort-mem`（Rust `ort` 2.0.0-rc.13，不链 Burn；arena off = inmotion-social）
+- **参考对照**：`python3 crates/e5-embed/scripts/ort_mem.py`（CPython + onnxruntime 1.29.0，`gen_ref.py` 同源）
+- **burn**：`cargo run --release -p e5-embed --bin mem_stress -- 5 2048`
+
+| 阶段 | burn 融 DQL | **ORT native arena off** | ORT native arena on | ORT Python arena off | ORT Python arena on |
+|---|---:|---:|---:|---:|---:|
+| 进程启动 | 3.1 | 7.2 | 7.2 | 13.0 | 12.9 |
+| 运行时库就绪 | （链进二进制） | 16.4 | 16.5 | 53.7 | 53.6 |
+| 模型加载后 RSS | 87.6 | 157.8 | 156.8 | 198.0 | 198.7 |
+| 加载冲高 HWM | 97.4 | 235.3 | 235.2 | 272.5 | 272.6 |
+| 4×512 稳态 RSS | 213.4 | **162.2** | 404.2 | 201.9 | 445.0 |
+| 4×512 峰值 HWM | 315.1 | **267.8** | 404.2 | 307.4 | 445.0 |
+| compare_ort 全流程 RSS | 236.1 | — | — | — | — |
+| compare_ort 全流程 HWM | 401.0 | — | — | — | — |
+
+和 VNNI+zp 比，融 DQL 几乎不改占用（加载 ~88 MB，4×512 稳态 ~214 MB）。
+
+读法：
+
+1. **容器 / cgroup 只看整进程。** 生产是 Rust+ort、arena off：4×512 稳态 burn **213 MB** vs ORT **162 MB**（约 +51 MB）；峰值 HWM **315 vs 268**（约 +47 MB）。两边都进 512 MB。Python 行比 native 大约多 40 MB，那是 CPython+numpy，不是 ORT 更肥。
+2. **加载增量（减宿主）** 说明权重+运行时：burn 87.6−3.1 ≈ **85 MB**；ORT native 157.8−7.2 ≈ **151 MB**；ORT Python 198−54 ≈ **144 MB**。burn 加载更轻，ORT 加载 HWM 冲到 235 再回落到 ~158（初始化拷贝）。
+3. **推理 scratch 才是 burn 更肥的原因。** 4×512 HWM 相对加载后：burn 315−88 ≈ **+227 MB**；ORT native 268−158 ≈ **+110 MB**。DQL 中间张量少了约 10 趟，但 attention `[12,S,S]` 的 softmax/f32 激活仍在，所以融 DQL 峰值几乎不变。
+4. **arena on** 稳态 404–445 MB，逼近 512 MB 线——这就是线上关掉 CPU arena 的原因。关 arena 之后当前 RSS 会回落，但 HWM 仍记录冲高。
+
+4×512 稳态时延：burn ~5.8 s；ORT native arena off ~0.7 s；arena on ~0.23 s。
 
 ## 还剩什么
 

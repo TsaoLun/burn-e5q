@@ -72,7 +72,7 @@ def log(label: str) -> tuple[float, float]:
 
 
 def log_maps(label: str) -> None:
-    maps = smaps_rss_mb("libonnxruntime", "numpy", "libpython")
+    maps = smaps_rss_mb("onnxruntime", "numpy", "libpython", "python3")
     parts = "  ".join(f"{k} {v:.1f}" for k, v in maps.items() if v > 0.05)
     if parts:
         print(f"{label:28s}  maps  {parts} MB")

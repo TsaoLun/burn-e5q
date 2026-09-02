@@ -13,7 +13,7 @@ use anyhow::Context;
 use serde::Deserialize;
 
 use e5_embed::{
-    E5_PASSAGE_PREFIX, E5_QUERY_PREFIX, E5Embedder, current_hwm_mb, current_rss_mb, default_model_dir,
+    E5_PASSAGE_PREFIX, E5_QUERY_PREFIX, E5Embedder, current_rss_hwm_mb, default_model_dir,
 };
 
 #[derive(Debug, Deserialize)]
@@ -89,7 +89,10 @@ fn paired_queries<'a>(
         .filter(|c| c.prefix == E5_QUERY_PREFIX)
         .collect();
     let got = embedder.embed_queries(
-        &query_cases.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(),
+        &query_cases
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect::<Vec<_>>(),
     )?;
     Ok(query_cases.into_iter().zip(got).collect())
 }
@@ -105,13 +108,10 @@ fn main() -> anyhow::Result<()> {
     println!("Reference model: {}", ref_data.model);
     println!("Reference file:  {ref_path}\n");
 
-    match current_hwm_mb() {
-        Some(hwm) => println!(
-            "RSS before model load: {:.1} MB  HWM {:.1} MB",
-            current_rss_mb(),
-            hwm
-        ),
-        None => println!("RSS before model load: {:.1} MB", current_rss_mb()),
+    let (rss, hwm) = current_rss_hwm_mb();
+    match hwm {
+        Some(hwm) => println!("RSS before model load: {rss:.1} MB  HWM {hwm:.1} MB"),
+        None => println!("RSS before model load: {rss:.1} MB"),
     }
     let load_start = Instant::now();
     let device = burn::prelude::Device::default();
@@ -124,17 +124,15 @@ fn main() -> anyhow::Result<()> {
         }
     );
     let embedder = E5Embedder::load(&default_model_dir(), &device)?;
-    match current_hwm_mb() {
+    let (rss, hwm) = current_rss_hwm_mb();
+    match hwm {
         Some(hwm) => println!(
-            "Model loaded in {:.2?}. RSS: {:.1} MB  HWM {:.1} MB",
-            load_start.elapsed(),
-            current_rss_mb(),
-            hwm
+            "Model loaded in {:.2?}. RSS: {rss:.1} MB  HWM {hwm:.1} MB",
+            load_start.elapsed()
         ),
         None => println!(
-            "Model loaded in {:.2?}. RSS: {:.1} MB",
-            load_start.elapsed(),
-            current_rss_mb()
+            "Model loaded in {:.2?}. RSS: {rss:.1} MB",
+            load_start.elapsed()
         ),
     }
 
@@ -158,7 +156,14 @@ fn main() -> anyhow::Result<()> {
         }
     }
     if tokenizer_mismatch == 0 {
-        println!("  ✓ all {} non-empty cases have identical ids", ref_data.cases.iter().filter(|c| !c.text.trim().is_empty()).count());
+        println!(
+            "  ✓ all {} non-empty cases have identical ids",
+            ref_data
+                .cases
+                .iter()
+                .filter(|c| !c.text.trim().is_empty())
+                .count()
+        );
     } else {
         println!("  ✗ {tokenizer_mismatch} cases mismatch");
     }
@@ -177,10 +182,16 @@ fn main() -> anyhow::Result<()> {
         .filter(|c| c.prefix == E5_QUERY_PREFIX)
         .collect();
     let got_passages = embedder.embed_passages(
-        &passage_cases.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(),
+        &passage_cases
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect::<Vec<_>>(),
     )?;
     let got_queries = embedder.embed_queries(
-        &query_cases.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(),
+        &query_cases
+            .iter()
+            .map(|c| c.text.as_str())
+            .collect::<Vec<_>>(),
     )?;
     let paired = passage_cases
         .iter()
@@ -192,7 +203,10 @@ fn main() -> anyhow::Result<()> {
     for (case, burn_emb) in paired {
         if case.text.trim().is_empty() {
             let is_zero = burn_emb.iter().all(|&x| x == 0.0);
-            println!("  empty text -> zero vector: {}", if is_zero { "✓" } else { "✗" });
+            println!(
+                "  empty text -> zero vector: {}",
+                if is_zero { "✓" } else { "✗" }
+            );
             continue;
         }
         let cos = cosine(burn_emb, &case.embedding);
@@ -200,7 +214,11 @@ fn main() -> anyhow::Result<()> {
         sum_cos += cos as f64;
         let mark = if cos > 0.999 { "✓" } else { "✗" };
         let label: String = case.text.chars().take(28).collect();
-        println!("  {mark} cos={cos:.6}  {}{:?}", case.prefix.trim_end_matches(": "), label);
+        println!(
+            "  {mark} cos={cos:.6}  {}{:?}",
+            case.prefix.trim_end_matches(": "),
+            label
+        );
     }
     let n = ref_data
         .cases
@@ -222,9 +240,8 @@ fn main() -> anyhow::Result<()> {
         .iter()
         .filter(|c| c.prefix == E5_PASSAGE_PREFIX && !c.text.trim().is_empty())
         .collect();
-    let burn_passages = embedder.embed_passages(
-        &corpus.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(),
-    )?;
+    let burn_passages =
+        embedder.embed_passages(&corpus.iter().map(|c| c.text.as_str()).collect::<Vec<_>>())?;
     let mut rank_match = 0usize;
     let mut rank_total = 0usize;
     for (case, burn_q) in paired_queries(&ref_data, &embedder)? {
@@ -324,9 +341,13 @@ fn main() -> anyhow::Result<()> {
         long_toks
     );
 
-    println!("\nRSS after all inference: {:.1} MB", current_rss_mb());
-    if let Some(hwm) = current_hwm_mb() {
-        println!("kernel peak HWM:         {hwm:.1} MB");
+    let (rss, hwm) = current_rss_hwm_mb();
+    match hwm {
+        Some(hwm) => {
+            println!("\nRSS after all inference: {rss:.1} MB");
+            println!("kernel peak HWM:         {hwm:.1} MB");
+        }
+        None => println!("\nRSS after all inference: {rss:.1} MB"),
     }
     Ok(())
 }
