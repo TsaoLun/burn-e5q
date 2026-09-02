@@ -76,10 +76,11 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 下一步（按优先级）
 
-1. **flex VNNI + 融合 zp**（`notes/flex-vnni.md`）：短 33 ms / 512 tok 1.46 s。再往下是 DQL，不是 GEMM。
-2. **flex 分块**（`notes/flex-accel.md`）：SSE2 下 130→76 ms / 3.82→2.80 s。被 native+VNNI 取代为默认路径。
-3. **阶段 4 cubecl**：短文本仍被 launch 卡住；叶子还不是手写 VNNI。
-4. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
+1. **flex 融合 DQL**（`notes/flex-dql.md`）：codegen 一行 + flex 两趟 kernel。对拍见本文件「融 DQL」。
+2. **flex VNNI + 融合 zp**（`notes/flex-vnni.md`）：短 33 ms / 512 tok 1.46 s。
+3. **flex 分块**（`notes/flex-accel.md`）：SSE2 下 130→76 ms / 3.82→2.80 s。被 native+VNNI 取代为默认路径。
+4. **阶段 4 cubecl**：短文本仍被 launch 卡住；叶子还不是手写 VNNI。
+5. 上线前用真实语料做 recall@k 评估（替代绝对 cos 阈值）。
 
 ---
 
@@ -213,8 +214,13 @@ cargo run --release -p e5-embed --bin mem_stress -- 10 4096
 
 ## 还剩什么
 
-512 tok 的 1.46 s 已经靠近「96 个 DQL + LN + clone」的固定开销。再抠 GEMM 收益很小。下一步若还要靠近 ort：
+512 tok 的 1.46 s 已经靠近「96 个 DQL + LN + clone」的固定开销。下一步见本文件「融 DQL」。
 
-1. 把 DQL 融进 GEMM（或至少别对每个激活做完整 min/max/round 图）
-2. 权重侧 AMX / 预打包 VNNI B 面板
-3. cubecl 短序列 launch 开销（和这条 flex 路径无关）
+---
+
+# 融 DQL
+
+> 日期：2026-09-02。栈：`vendor/burn-route-int8-matmul` `2d1084f` + `vendor/burn-onnx-keep-int8-matmul` `7cc2d36`。
+> 实现：`notes/flex-dql.md`。对拍数字在 `compare_ort` / `mem_stress` 跑完后填入。
+
+待测：性能（短 / batch8 / 512）、吞吐（q/s、tok/s）、内存（加载 RSS + `mem_stress -- 5 2048`）。

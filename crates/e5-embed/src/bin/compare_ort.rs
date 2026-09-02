@@ -40,6 +40,23 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+fn capped_tokens(embedder: &E5Embedder, prefix: &str, text: &str) -> usize {
+    embedder
+        .encode_prefixed(prefix, text)
+        .map(|ids| ids.len().min(512))
+        .unwrap_or(0)
+}
+
+fn print_perf_row(label: &str, burn_ms: f64, ort_ms: f64, n_q: usize, n_tok: usize) {
+    let qps = n_q as f64 * 1e3 / burn_ms.max(1e-9);
+    let tps = n_tok as f64 * 1e3 / burn_ms.max(1e-9);
+    let ort_qps = n_q as f64 * 1e3 / ort_ms.max(1e-9);
+    println!(
+        "  {label}: burn {burn_ms:8.1} ms ({qps:6.2} q/s, {tps:7.0} tok/s) | ort {ort_ms:6.1} ms ({ort_qps:6.2} q/s) | {ratio:.1}×",
+        ratio = burn_ms / ort_ms.max(1e-9)
+    );
+}
+
 fn rank_top3(corpus: &[&RefCase], query_emb: &[f32]) -> Vec<usize> {
     let mut scored: Vec<(usize, f32)> = corpus
         .iter()
@@ -220,25 +237,35 @@ fn main() -> anyhow::Result<()> {
         }
     );
     let single = ["周末滨江夜骑 V11，速度很快！"];
+    let single_toks = capped_tokens(&embedder, E5_PASSAGE_PREFIX, single[0]);
     let mut burn_single = f64::INFINITY;
     for _ in 0..3 {
         let t = Instant::now();
         let _ = embedder.embed_passages(&single)?;
         burn_single = burn_single.min(t.elapsed().as_secs_f64() * 1e3);
     }
-    println!(
-        "  single short passage:  burn {burn_single:8.1} ms | ort baseline {:6.1} ms",
-        ref_data.latency.ort_single_ms
+    print_perf_row(
+        "single short passage ",
+        burn_single,
+        ref_data.latency.ort_single_ms,
+        1,
+        single_toks,
     );
 
     let passage_texts: Vec<&str> = passage_cases.iter().map(|c| c.text.as_str()).collect();
+    let batch_toks: usize = passage_texts
+        .iter()
+        .map(|t| capped_tokens(&embedder, E5_PASSAGE_PREFIX, t))
+        .sum();
     let t = Instant::now();
     let _ = embedder.embed_passages(&passage_texts)?;
     let burn_batch = t.elapsed().as_secs_f64() * 1e3;
-    println!(
-        "  batch of {}:           burn {burn_batch:8.1} ms | ort baseline {:6.1} ms",
+    print_perf_row(
+        &format!("batch of {}          ", passage_texts.len()),
+        burn_batch,
+        ref_data.latency.ort_batch8_ms,
         passage_texts.len(),
-        ref_data.latency.ort_batch8_ms
+        batch_toks,
     );
 
     let long_text = ref_data
@@ -247,12 +274,37 @@ fn main() -> anyhow::Result<()> {
         .map(|c| c.text.as_str())
         .max_by_key(|t| t.len())
         .unwrap_or("night ride");
+    let long_toks = capped_tokens(&embedder, E5_PASSAGE_PREFIX, long_text);
     let t = Instant::now();
     let _ = embedder.embed_passages(&[long_text])?;
     let burn_long = t.elapsed().as_secs_f64() * 1e3;
+    print_perf_row(
+        "single long (512 tok)",
+        burn_long,
+        ref_data.latency.ort_long512_ms,
+        1,
+        long_toks,
+    );
+
+    println!("\n=== Throughput ===");
     println!(
-        "  single long (512 tok): burn {burn_long:8.1} ms | ort baseline {:6.1} ms",
-        ref_data.latency.ort_long512_ms
+        "  short : {:>7.2} q/s   {:>8.0} tok/s   ({} tok)",
+        1e3 / burn_single.max(1e-9),
+        single_toks as f64 * 1e3 / burn_single.max(1e-9),
+        single_toks
+    );
+    println!(
+        "  batch : {:>7.2} q/s   {:>8.0} tok/s   ({} tok / {} q)",
+        passage_texts.len() as f64 * 1e3 / burn_batch.max(1e-9),
+        batch_toks as f64 * 1e3 / burn_batch.max(1e-9),
+        batch_toks,
+        passage_texts.len()
+    );
+    println!(
+        "  512   : {:>7.2} q/s   {:>8.0} tok/s   ({} tok)",
+        1e3 / burn_long.max(1e-9),
+        long_toks as f64 * 1e3 / burn_long.max(1e-9),
+        long_toks
     );
 
     println!("\nRSS after all inference: {:.1} MB", current_rss_mb());

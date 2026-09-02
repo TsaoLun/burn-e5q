@@ -20,9 +20,9 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 
 | Crate | Source | Current pin |
 |---|---|---|
-| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-keep-int8-matmul` | `3a2bf47daa6abc36cac771e9d6392294408b5544` |
+| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-keep-int8-matmul` | `7cc2d36ed5fa41bd247f9f1540a52950745c73c1` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-route-int8-matmul` | `30cab971f953fab70e7c7de10f8d33d9d39f6fc4` |
+| `burn`, `burn-store` | this repo `vendor/burn-route-int8-matmul` | `2d1084f760c8f948433d960d68cb667ca31b7290` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -53,7 +53,9 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
    (`vendor/burn-onnx-keep-int8-matmul`).
 4. **cubecl** — host `TargetMachine` for LLVM `default<O3>` so the leaf can
    autovec to AVX512/VNNI (`vendor/cubecl-host-native-jit`).
-5. **Re-bench** — `cargo run --release -p e5-embed --features cpu --no-default-features --bin compare_ort`
+5. **fused DQL** — `Tensor::dynamic_quantize_linear`; flex two-pass minmax+quantize
+   (`vendor/burn-route-int8-matmul` `2d1084f` + codegen `7cc2d36`).
+6. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 
