@@ -7,8 +7,8 @@
 > |---|---|
 > | 本仓库 | tokenizer、对拍、内存压测、阶段文档 |
 > | [TsaoLun/burn-onnx](https://github.com/TsaoLun/burn-onnx) `add-dynamic-quantize-linear` | DQL + clone-tracking 修复 |
-> | [TsaoLun/cubek](https://github.com/TsaoLun/cubek) | 阶段 4 i8 GEMM（`[patch]` 覆盖 burn 对 tracel-ai/cubek 的依赖） |
-> | tracel-ai/burn @ `af844911` | 运行时；尚未 fork |
+> | [TsaoLun/cubek](https://github.com/TsaoLun/cubek) | 阶段 4 i8 GEMM（实现已完成；`[patch]` 覆盖 burn 对 cubek 的依赖） |
+> | burn / cubecl / burn-onnx | 阶段 4 接线与 host-native JIT；`cursor[bot]` 无法写 TsaoLun fork，暂钉 `TsaoLun/burn-e5q` 的 `vendor/*` snapshot（见 `AGENTS.md`） |
 
 云端 agent 请先读 **`AGENTS.md`**，阶段 4 操作手册是 **`notes/stage-4.md`**。
 
@@ -123,29 +123,28 @@ y = clamp(round(x / y_scale) + y_zero_point, qmin, qmax)
 
 ---
 
-## 阶段 4：cubek i8 GEMM（性能攻坚，1–2 周）
+## 阶段 4：cubek i8 GEMM（性能攻坚）
 
 **前置已满足**：阶段 3 测得 flex 比 ort VNNI 慢 19–45×。手册：`notes/stage-4.md`。
+实现说明：`notes/stage-4-impl.md`。`cursor[bot]` 无法写 TsaoLun fork，代码以 orphan snapshot 钉在本仓库 `vendor/*`。
 
-### 4.1 在 [TsaoLun/cubek](https://github.com/TsaoLun/cubek) 写整数 GEMM
-- 目标：`U8/I8 × U8/I8 → I32`，x86_64 上 AVX512-VNNI（`vpdpbusd`）
-- 落点：扩展 `cubek-matmul` 的 `tiled/cpu_gemm`，或新 `integer_gemm` 目录
+### 4.1 cubek 整数 GEMM — 已实现（`vendor/cubek-add-i8-gemm`）
+- `U8/I8 × U8/I8 → I32` 走 tiled CpuGemm；K 面板按输入字节计，优先 `tile_k` 为 4 的倍数
+- 叶子仍是 tiled `SUM_PROD`；host-native LLVM TM（`vendor/cubecl-host-native-jit`）让 O3 有机会 autovec 到 VNNI
 - **不要**套 cubek-quant 的 per-block `mm_scaled`（那是 Q4S/Q8S，不是 ONNX MatMulInteger）
-- 推分支后 bump 本仓库 `Cargo.toml` 里两处 cubek `rev`
 
-### 4.2 burn-cpu 接线（需要 burn 源码改动）
-- `burn-cubecl` 的 `int_matmul` 目前走通用 `matmul`；I8/U8 时应路由到 4.1
-- 本仓库尚未 fork burn；要持久化接线就开 TsaoLun/burn 或 `[patch]` burn
+### 4.2 burn-cpu 接线 — 已实现（`vendor/burn-route-int8-matmul`）
+- `CubeBackend::int_matmul`：两边都是 I8/U8 时输出 I32，强制 `MatmulStrategy::CpuGemm`
+- flex：混合 u8/i8 先 `int_cast(I32)` 再走现有 i32 GEMM
 
-### 4.3 burn-onnx codegen（可能不必改）
-- 现状：`MatMulInteger` **先 cast I32 再 matmul**，会绕过 i8 kernel
-- 若 4.2 只看运行时 dtype，必须让 codegen 保留 u8/i8，或提供 fused `matmul_integer`
-- 改动推 [TsaoLun/burn-onnx](https://github.com/TsaoLun/burn-onnx)，再 bump `rev`
+### 4.3 burn-onnx codegen — 已实现（`vendor/burn-onnx-keep-int8-matmul`）
+- MatMulInteger **不再** `cast(I32)` 再 `.matmul()`，保留输入 dtype
+- zp 用代数恒等式：`(A-za)@(B-zb) = A@B − za·sum_k(B) − sum_k(A)·zb + za·zb·K`
 
 ### 4.4 回归
 `e5-embed --features cpu` 的 `compare_ort` / `mem_stress`；结果追加到 `notes/poc-results.md`。
 
-**产出**：cubek PR「Add i8 GEMM with AVX512-VNNI」+（如需要）burn PR「Route int_matmul to i8 kernel」+（如需要）burn-onnx PR。建议拆 PR。
+**产出**：本仓库 pin + 对拍。真 fork 分支（`add-i8-gemm` / `route-int8-matmul` / `keep-int8-matmul` / `host-native-jit`）待有写权限后再推。
 
 ---
 
@@ -175,5 +174,6 @@ y = clamp(round(x / y_scale) + y_zero_point, qmin, qmax)
 - [x] 阶段 1：burn-onnx 本地实现 DQL，e5-small 图不再报 DQL unsupported（fork 分支 `add-dynamic-quantize-linear`，含 graph.rs clone-tracking 修复；官方 6 条 node test 编译通过）
 - [x] 阶段 2：model-check 通过（`cargo xtask model-check --model multilingual-e5-small`，last_hidden_state 与 pooled 均在 1e-4 内匹配 ort；fork 分支 `add-multilingual-e5-small-model-check`）
 - [x] 阶段 3：PoC 对拍完成（`notes/poc-results.md`：tokenizer 9/9 ✓，int8 cos 0.996 属固有跨引擎分歧，top-1 检索 2/2；延迟差 19–45×；4096 预算 RSS 640MB 超标，降 2048 → 416MB ✓）
-- [ ] 阶段 4：i8 GEMM 上线，延迟追平 ort（手册：`notes/stage-4.md`；fork：TsaoLun/cubek）
+- [x] 阶段 4 接线：u8/i8 CpuGemm + host TM + 代数 zp（`notes/stage-4-impl.md`）；`compare_ort --features cpu` 跑通，mean cos 0.995
+- [ ] 阶段 4 延迟：短文本仍远慢于 ort（launch + 未融合 zp）；见 `notes/poc-results.md` 阶段 4
 - [ ] 阶段 5：inmotion-social 部署纯 burn 版本

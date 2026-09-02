@@ -89,6 +89,14 @@ fn main() -> anyhow::Result<()> {
     println!("RSS before model load: {:.1} MB", current_rss_mb());
     let load_start = Instant::now();
     let device = burn::prelude::Device::default();
+    println!(
+        "Device: {device:?} ({})",
+        if cfg!(feature = "cpu") {
+            "cubecl-cpu"
+        } else {
+            "flex"
+        }
+    );
     let embedder = E5Embedder::load(&default_model_dir(), &device)?;
     println!(
         "Model loaded in {:.2?}. RSS: {:.1} MB",
@@ -203,7 +211,14 @@ fn main() -> anyhow::Result<()> {
     println!("  ranking match: {rank_match}/{rank_total}");
 
     // 3. Latency: single short passage, all-at-once batch, one 512-token row.
-    println!("\n=== Latency (flex backend, release) ===");
+    println!(
+        "\n=== Latency ({}, release) ===",
+        if cfg!(feature = "cpu") {
+            "cubecl-cpu"
+        } else {
+            "flex"
+        }
+    );
     let single = ["周末滨江夜骑 V11，速度很快！"];
     let mut burn_single = f64::INFINITY;
     for _ in 0..3 {
