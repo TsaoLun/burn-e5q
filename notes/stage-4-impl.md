@@ -14,11 +14,12 @@
 - 测试（`cargo test -p cubek-matmul --release --features cubecl/cpu --test lib cpu_int8`）：
   `u8×u8`、`i8×i8`、`u8×i8`、K 非 4 对齐、e5-like 8×32×64、Inferred heuristic。**6/6 过。**
 
-### 2. burn `vendor/burn-route-int8-matmul` (`2223f5a0`)
+### 2. burn `vendor/burn-route-int8-matmul` (`005354fd`)
 
 - `CubeBackend::int_matmul`：两边都是 I8/U8 时输出 **I32**，策略 **CpuGemm**（不走 autotune）。
 - `launch_matmul` 修了 rhs 被标成 `lhs.dtype` 的 bug（否则 u8×i8 错）。
-- flex：`u8/i8`（含混合）先 `int_cast(I32)` 再走现有 i32 GEMM。单测 `u8×i8` / `u8×u8` 过。
+- flex（`005354fd`）：分块 i-k-j GEMM，`u8/i8` **不再整表 widen**，也不再整表转置 rhs。
+  大 `M` 走 rayon。单测 u8×i8 / u8×u8 / i8×i8 / broadcast + `int_gemm` 对照朴素循环过。
 
 ### 3. burn-onnx `vendor/burn-onnx-keep-int8-matmul` (`b88643ea`)
 

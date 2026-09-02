@@ -20,8 +20,8 @@ license = "MIT OR Apache-2.0"
 # | burn-onnx / onnx-ir | `vendor/burn-onnx-keep-int8-matmul` |
 # | cubek | `vendor/cubek-add-i8-gemm` |
 # | cubecl (host TM) | `vendor/cubecl-host-native-jit` |
-burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df" }
-burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "2223f5a0af127862df27c6e40108a926bbbdc8df", features = ["std"] }
+burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "005354fdd25b2780af0d53d40de3d9252c79b802" }
+burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "005354fdd25b2780af0d53d40de3d9252c79b802", features = ["std"] }
 
 burn-onnx = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "b88643ea7018557b38b511544f9933b4c2e5f98b" }
 onnx-ir = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "b88643ea7018557b38b511544f9933b4c2e5f98b" }
