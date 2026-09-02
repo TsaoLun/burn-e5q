@@ -20,12 +20,18 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 
 | Crate | Source | Current pin |
 |---|---|---|
-| `burn-onnx`, `onnx-ir` | `https://github.com/TsaoLun/burn-onnx` | `63e35840812fe573608d7152868f2c1972494887` (`add-dynamic-quantize-linear`) |
-| `cubek` | `https://github.com/TsaoLun/cubek` via `[patch]` of `tracel-ai/cubek` | `c1a1a9eb5e655d8728d92e61b8a44ce0794d9afb` (`main`) |
-| `burn`, `burn-store` | `https://github.com/tracel-ai/burn` | `af844911be6efb6745301c1c2c5e695d6571b316` |
+| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-keep-int8-matmul` | `39a7d6ff298799027bf07a75f47f9d4c029b0430` |
+| `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
+| `burn`, `burn-store` | this repo `vendor/burn-route-int8-matmul` | `2223f5a0af127862df27c6e40108a926bbbdc8df` |
+| `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
+
+The TsaoLun forks denied this agent's `git push` (403). Each working tree is
+an orphan snapshot on **this** repo so Cargo can still pin them. After you
+push `add-i8-gemm` / `route-int8-matmul` / `keep-int8-matmul` / `host-native-jit`
+to the real forks, retarget the `rev`s in the root `Cargo.toml`.
 
 `burn/cpu` still depends on `tracel-ai/cubek`. The `[patch]` table is what makes
-`cargo run -p e5-embed --features cpu` pick up the fork. Do not delete it.
+`cargo run -p e5-embed --features cpu` pick up the integer GEMM. Do not delete it.
 
 Optional local overlay while iterating: clone cubek as a sibling, comment out
 the git `[patch]` block, uncomment the `path = "../cubek/crates/cubek"` block.
@@ -37,19 +43,17 @@ Cut e5-embed latency from ~20–45× slower than ort down toward parity, by
 giving CubeCL-CPU a real `u8/i8 → i32` GEMM (AVX512-VNNI `vpdpbusd` on x86_64)
 instead of flex's naive i32 triple loop.
 
-Work order (details in `notes/stage-4.md`):
+Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 
-1. **cubek** — integer GEMM kernel + tests on TsaoLun/cubek. Push a branch, bump
-   this workspace's cubek `rev`.
-2. **burn-cpu wiring** — `CubeBackend::int_matmul` currently calls generic
-   `matmul(...)`. Route I8/U8→I32 through the new kernel. This lives in
-   `tracel-ai/burn` (`crates/burn-cubecl/src/ops/int_tensor.rs`). If you need
-   to persist that change, fork burn or `[patch]` it; this workspace does not
-   yet fork burn.
-3. **burn-onnx (optional later)** — `MatMulInteger` codegen today casts to I32
-   then `.matmul()`. Once the backend's int matmul is fast, codegen may not
-   need to change. Only special-case codegen if zp/u8×i8 layout requires it.
-4. **Re-bench** — `cargo run --release -p e5-embed --features cpu --bin compare_ort`
+1. **cubek** — `u8/i8→i32` CpuGemm + tests (`vendor/cubek-add-i8-gemm`).
+2. **burn-cpu wiring** — I8/U8 `int_matmul` → I32 via `MatmulStrategy::CpuGemm`;
+   flex widens mixed u8×i8 (`vendor/burn-route-int8-matmul`).
+3. **burn-onnx** — MatMulInteger keeps input dtypes; zp via
+   `(A-za)@(B-zb) = A@B − za·sum_k(B) − sum_k(A)·zb + za·zb·K`
+   (`vendor/burn-onnx-keep-int8-matmul`).
+4. **cubecl** — host `TargetMachine` for LLVM `default<O3>` so the leaf can
+   autovec to AVX512/VNNI (`vendor/cubecl-host-native-jit`).
+5. **Re-bench** — `cargo run --release -p e5-embed --features cpu --no-default-features --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 
