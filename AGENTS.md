@@ -81,10 +81,9 @@ cargo run --release -p e5-embed --features cpu --no-default-features --bin compa
 # memory: ./mem_stress <rounds> <token_budget>
 cargo run --release -p e5-embed --bin mem_stress -- 5 2048
 
-# entire ORT process RSS (same 4×512 shapes; arena off = production)
-python3 crates/e5-embed/scripts/ort_mem.py
-python3 crates/e5-embed/scripts/ort_mem.py --arena
+# Rust ort (inmotion-social): cosine + latency + process RSS
 cargo run --release -p ort-mem -- -- 5 2048
+cargo run --release -p ort-mem -- --arena -- 5 2048
 ```
 
 `crates/e5-embed/scripts/gen_ref.py` regenerates `ref_data.json` (needs
