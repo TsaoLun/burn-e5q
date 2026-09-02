@@ -107,6 +107,7 @@ mod float;
 pub mod gather_scatter;
 pub mod grid_sample;
 mod int;
+pub(crate) mod int_gemm;
 pub mod interpolate;
 pub mod mask;
 pub mod matmul;
