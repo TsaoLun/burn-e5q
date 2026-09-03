@@ -1,6 +1,7 @@
 # 阶段 4：cubek i8 GEMM 性能攻坚
 
 云端 agent 的操作手册。背景与数字见 `notes/poc-results.md`，仓库边界见 `AGENTS.md`。
+**实现已落地**（2026-09-01）：见 `notes/stage-4-impl.md`。下文是当时的任务拆分，保留作背景。
 
 ## 为什么现在做
 

@@ -1,0 +1,15 @@
+[package]
+name = "ort-mem"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+# Native ONNX Runtime process RSS, matching inmotion-social (Rust + ort,
+# arena off). Not linked against e5-embed/burn so the binary is ORT-only.
+# Linux-oriented: macOS x86_64 may fail to fetch a prebuilt ort-sys.
+
+[dependencies]
+anyhow = "1"
+ort = { version = "2.0.0-rc.13", default-features = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
