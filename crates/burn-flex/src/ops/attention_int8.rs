@@ -29,6 +29,7 @@ use crate::{FlexTensor, Layout};
 /// Minimum sequence on both Q and KV before this path may fire.
 const MIN_SEQ: usize = 256;
 
+#[allow(dead_code)] // kept for tests; not hooked into attention_flash (slower on e5)
 pub(crate) fn should_use(
     query: &FlexTensor,
     key: &FlexTensor,
@@ -412,7 +413,7 @@ unsafe fn pv_f32_avx512_d32(p: &[f32], v: &[f32], out: &mut [f32], seq_q: usize,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ops::attention::{attention_flash, attention_naive};
+    use crate::ops::attention::attention_naive;
     use burn_std::Shape;
 
     fn flex_f32(data: Vec<f32>, shape: &[usize]) -> FlexTensor {
@@ -483,14 +484,8 @@ mod tests {
             None,
             Default::default(),
         );
-        let flash = attention_flash(q, k, v, None, None, Default::default());
-
         let ia: &[f32] = int8.storage();
         let na: &[f32] = naive.storage();
-        let fa: &[f32] = flash.storage();
-        // int8 path is selected by attention_flash for this shape, so flash
-        // and int8 must match exactly; both stay close to f32 naive.
-        assert_eq!(ia, fa);
         let cos = cosine(ia, na);
         assert!(
             cos > 0.98,

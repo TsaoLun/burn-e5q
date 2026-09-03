@@ -193,11 +193,10 @@ pub fn attention_flash(
     attn_bias: Option<FlexTensor>,
     options: AttentionModuleOptions,
 ) -> FlexTensor {
-    if crate::ops::attention_int8::should_use(&query, &key, &value, &options) {
-        return crate::ops::attention_int8::flash_int8(
-            query, key, value, mask, attn_bias, options,
-        );
-    }
+    // Route C-lite (VNNI QK, `attention_int8`) was measured on e5 512 and
+    // lost to tiled f32 flash (~280 ms vs ~205 ms): DQL + [S,S] + K=32
+    // VNNI is slower than the gemm crate. Kernel stays for tests; hook it
+    // only when QK+PV are both integer and tiled.
     dispatch_attention_dtype!(query, key, value, mask, attn_bias, options, attention_impl)
 }
 
