@@ -57,10 +57,19 @@ impl ActivationOps<Flex> for Flex {
     }
 
     fn gelu(tensor: FloatTensor<Flex>) -> FloatTensor<Flex> {
-        // 0.5 * x * (1 + erf(x / sqrt(2)))
+        // 0.5 * x * (1 + erf(x / sqrt(2))) — same libm erf as the unary path.
+        // Large contiguous f32 (e5 FFN is [1,512,1536] = 786K) fans out with
+        // rayon; a fused GELU node is otherwise one serial erf sweep.
         use crate::ops::unary::{erf_f32, erf_f64};
         let sqrt2_f32: f32 = core::f32::consts::SQRT_2;
         let sqrt2_f64: f64 = core::f64::consts::SQRT_2;
+        #[cfg(feature = "rayon")]
+        if tensor.dtype() == DType::F32
+            && tensor.layout().is_contiguous()
+            && tensor.layout().num_elements() >= crate::ops::PARALLEL_THRESHOLD
+        {
+            return gelu_f32_par(tensor, sqrt2_f32);
+        }
         unary_op(
             tensor,
             move |x: f32| 0.5 * x * (1.0 + erf_f32(x / sqrt2_f32)),
@@ -228,6 +237,47 @@ fn softmax_last(tensor: FloatTensor<Flex>) -> FloatTensor<Flex> {
         DType::BF16 => softmax_last_bf16(tensor),
         dtype => panic!("softmax: unsupported dtype {:?}", dtype),
     }
+}
+
+#[cfg(feature = "rayon")]
+fn gelu_f32_par(mut tensor: FlexTensor, sqrt2: f32) -> FlexTensor {
+    use crate::ops::unary::erf_f32;
+    use rayon::prelude::*;
+
+    const CHUNK: usize = 16 * 1024;
+    let n = tensor.layout().num_elements();
+
+    #[inline(always)]
+    fn gelu_one(v: f32, sqrt2: f32) -> f32 {
+        0.5 * v * (1.0 + erf_f32(v / sqrt2))
+    }
+
+    if tensor.is_unique() && tensor.layout().is_contiguous() && tensor.layout().start_offset() == 0 {
+        let storage: &mut [f32] = tensor.storage_mut();
+        storage[..n].par_chunks_mut(CHUNK).for_each(|chunk| {
+            for x in chunk.iter_mut() {
+                *x = gelu_one(*x, sqrt2);
+            }
+        });
+        return tensor;
+    }
+
+    let tensor = tensor.to_contiguous();
+    let shape = tensor.layout().shape().clone();
+    let src: &[f32] = tensor.storage();
+    let mut out = vec![0.0f32; n];
+    out.par_chunks_mut(CHUNK)
+        .zip(src[..n].par_chunks(CHUNK))
+        .for_each(|(dst, src)| {
+            for (o, &v) in dst.iter_mut().zip(src) {
+                *o = gelu_one(v, sqrt2);
+            }
+        });
+    FlexTensor::new(
+        Bytes::from_elems(out),
+        Layout::contiguous(shape),
+        DType::F32,
+    )
 }
 
 fn softmax_last_f32(tensor: FlexTensor) -> FlexTensor {
@@ -1054,7 +1104,9 @@ mod tests {
     use burn_std::{bf16, f16};
     use num_traits::Float;
 
-    use crate::FlexTensor;
+    use burn_backend::ops::ActivationOps;
+
+    use crate::{Flex, FlexTensor};
 
     // ============================================================================
     // Reference implementations (per-row, last-axis).
@@ -1142,6 +1194,42 @@ mod tests {
 
     fn flex_half<T: burn_backend::Element>(data: Vec<T>, shape: &[usize]) -> FlexTensor {
         FlexTensor::from_data(TensorData::new(data, shape.to_vec()))
+    }
+
+    // ============================================================================
+    // gelu (libm erf; large f32 uses rayon)
+    // ============================================================================
+
+    fn gelu_ref_f32(data: &[f32]) -> Vec<f32> {
+        use crate::ops::unary::erf_f32;
+        let sqrt2 = core::f32::consts::SQRT_2;
+        data.iter()
+            .map(|&x| 0.5 * x * (1.0 + erf_f32(x / sqrt2)))
+            .collect()
+    }
+
+    #[test]
+    fn test_gelu_small_matches_libm() {
+        let data: Vec<f32> = vec![-2.0, -0.5, 0.0, 0.5, 2.0, 3.5];
+        let expected = gelu_ref_f32(&data);
+        let out = Flex::gelu(flex_f32(data, &[2, 3]));
+        out.into_data().assert_approx_eq::<f32>(
+            &TensorData::new(expected, vec![2, 3]),
+            Tolerance::absolute(1e-6),
+        );
+    }
+
+    #[test]
+    fn test_gelu_parallel_matches_libm() {
+        // Just above PARALLEL_THRESHOLD so the rayon path is taken.
+        let n = crate::ops::PARALLEL_THRESHOLD + 17;
+        let data: Vec<f32> = (0..n).map(|i| ((i % 23) as f32) * 0.13 - 1.1).collect();
+        let expected = gelu_ref_f32(&data);
+        let out = Flex::gelu(flex_f32(data, &[n]));
+        out.into_data().assert_approx_eq::<f32>(
+            &TensorData::new(expected, vec![n]),
+            Tolerance::absolute(1e-6),
+        );
     }
 
     // ============================================================================
