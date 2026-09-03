@@ -384,7 +384,7 @@ Rust ort 53.8 ms 只有 `session.run`。公平模型倍数是 **12×**，不是 
 # 融 GELU / LayerNorm
 
 > 日期：2026-09-03。同一台 4 核 Xeon。
-> 栈：`vendor/burn-onnx-coalesce-gelu-ln` `c0f9a6d` + `vendor/burn-flex-par-gelu` `319336c`。
+> 栈：`vendor/burn-onnx-coalesce-gelu-ln` `68153cc` + `vendor/burn-flex-par-gelu` `319336c`。
 > 实现：`notes/flex-gelu-ln.md`。
 
 codegen 把展开 erf-GELU / 最后一维 LN 收成 `activation::gelu` 和 `nn::LayerNorm`。

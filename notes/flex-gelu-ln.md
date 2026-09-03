@@ -1,6 +1,6 @@
 # 收成 GELU + LayerNorm
 
-> 2026-09-03。改动在 `vendor/burn-onnx-coalesce-gelu-ln`（`c0f9a6d`）和
+> 2026-09-03。改动在 `vendor/burn-onnx-coalesce-gelu-ln`（`68153cc`）和
 > `vendor/burn-flex-par-gelu`（`319336c`）。对拍数字见 `notes/poc-results.md`「融 GELU/LN」。
 
 e5（opset 11）没有 `Gelu` / `LayerNormalization` 节点。生成图把它们展开成
@@ -20,7 +20,8 @@ e5（opset 11）没有 `Gelu` / `LayerNormalization` 节点。生成图把它们
 2. **`onnx-ir` `coalesce_layer_norm`**  
    锚点 `Sqrt`。匹配最后一维 `keepdims=1` 的
    `mean → (x-mean) → square → mean → +eps → sqrt → div → *γ → +β`。
-   平方认 `Pow(...,2)` 或 `Mul(c,c)`。γ/β 必须是 rank-1 且 `value()` 有数据
+   平方认 `Pow(...,2)` 或 `Mul(c,c)`。epsilon 下界用 `1e-13`（e5 的 f32 `1e-12`
+   转成 f64 是 ≈9.999e-13，闭区间 `[1e-12,…]` 会拒掉）。γ/β 必须是 rank-1 且 `value()` 有数据
    （否则 `LayerNorm::field()` 的 `static_shape_known()` 会炸，或变成全零权重）。
    最后那个 Add 换成 `LayerNormalization`，`axis=-1`，`stash_type=0`
    （跳过 codegen 多出来的 f32 cast）。
