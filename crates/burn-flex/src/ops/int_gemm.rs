@@ -30,6 +30,49 @@ const PARALLEL_OPS: usize = 8_000_000;
 #[path = "int_gemm_vnni.rs"]
 mod vnni;
 
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[path = "int_gemm_amx.rs"]
+mod amx;
+
+/// AVX-512-VNNI is present. Used by the integer-flash attention path.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+pub(crate) fn vnni_available() -> bool {
+    vnni::available()
+}
+
+#[cfg(not(all(target_arch = "x86_64", feature = "std")))]
+#[allow(dead_code)]
+pub(crate) fn vnni_available() -> bool {
+    false
+}
+
+/// `A[m,k] u8 @ B[k,n] u8 → i32[m,n]` into `out` (zeroed then filled).
+pub(crate) fn gemm_u8u8_into(
+    a: &[u8],
+    b: &[u8],
+    m: usize,
+    n: usize,
+    k: usize,
+    zp: &Zp,
+    out: &mut [i32],
+) {
+    debug_assert_eq!(a.len(), m.saturating_mul(k));
+    debug_assert_eq!(b.len(), k.saturating_mul(n));
+    debug_assert_eq!(out.len(), m.saturating_mul(n));
+    if m == 0 || n == 0 {
+        return;
+    }
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        if vnni::available() {
+            vnni::gemm_into::<true, false>(a, b, m, n, k, zp, out);
+            return;
+        }
+    }
+    let tmp = gemm_with_zp(a, b, m, n, k, zp);
+    out.copy_from_slice(&tmp);
+}
+
 pub(crate) trait AsAcc: Copy {
     fn as_acc(self) -> i32;
 }
@@ -140,6 +183,11 @@ where
 
     #[cfg(all(target_arch = "x86_64", feature = "std"))]
     {
+        if amx::available() {
+            if let Some(out) = try_amx(a, b, m, n, k, zp) {
+                return out;
+            }
+        }
         if vnni::available() {
             if let Some(out) = try_vnni(a, b, m, n, k, zp) {
                 return out;
@@ -197,6 +245,50 @@ where
             k,
             zp,
         ));
+    }
+    None
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+fn try_amx<A, B>(a: &[A], b: &[B], m: usize, n: usize, k: usize, zp: &Zp) -> Option<Vec<i32>>
+where
+    A: AsAcc + 'static + bytemuck::Pod,
+    B: AsAcc + 'static + bytemuck::Pod,
+{
+    let ta = TypeId::of::<A>();
+    let tb = TypeId::of::<B>();
+    if ta == TypeId::of::<u8>() && tb == TypeId::of::<i8>() {
+        return amx::gemm::<true, true>(bytemuck::cast_slice(a), bytemuck::cast_slice(b), m, n, k, zp);
+    }
+    if ta == TypeId::of::<u8>() && tb == TypeId::of::<u8>() {
+        return amx::gemm::<true, false>(
+            bytemuck::cast_slice(a),
+            bytemuck::cast_slice(b),
+            m,
+            n,
+            k,
+            zp,
+        );
+    }
+    if ta == TypeId::of::<i8>() && tb == TypeId::of::<i8>() {
+        return amx::gemm::<false, true>(
+            bytemuck::cast_slice(a),
+            bytemuck::cast_slice(b),
+            m,
+            n,
+            k,
+            zp,
+        );
+    }
+    if ta == TypeId::of::<i8>() && tb == TypeId::of::<u8>() {
+        return amx::gemm::<false, false>(
+            bytemuck::cast_slice(a),
+            bytemuck::cast_slice(b),
+            m,
+            n,
+            k,
+            zp,
+        );
     }
     None
 }
@@ -507,6 +599,29 @@ mod tests {
             gemm_with_zp(&a, &b, m, n, k, &zp),
             naive_zp(&a, &b, m, n, k, &zp)
         );
+    }
+
+    #[test]
+    fn gemm_amx_aligned_u8_i8_matches_naive() {
+        // 16×16×64 is one AMX tile; 64×64×384 is an e5-like QKV panel.
+        for (m, n, k) in [(16, 16, 64), (64, 64, 384)] {
+            let a: Vec<u8> = (0..m * k).map(|i| (i * 13 + 9) as u8).collect();
+            let b: Vec<i8> = (0..k * n).map(|i| ((i * 7) as i16 - 100) as i8).collect();
+            let zp = Zp {
+                za: ZpLane::Scalar(17),
+                zb: ZpLane::Scalar(-3),
+            };
+            assert_eq!(
+                gemm(&a, &b, m, n, k),
+                naive(&a, &b, m, n, k),
+                "no-zp {m}x{n}x{k}"
+            );
+            assert_eq!(
+                gemm_with_zp(&a, &b, m, n, k, &zp),
+                naive_zp(&a, &b, m, n, k, &zp),
+                "zp {m}x{n}x{k}"
+            );
+        }
     }
 
     #[test]

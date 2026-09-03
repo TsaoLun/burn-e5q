@@ -126,10 +126,10 @@ macro_rules! dispatch_attention_dtype {
 /// the inner loop re-reads the same tile for every pair without allocating an expanded
 /// copy. The tile length itself is always `seq_q * seq_kv` and is computed at the call
 /// site, so it is not stored here.
-struct BroadcastMaskBias {
-    tensor: FlexTensor,
-    batch_step: usize,
-    head_step: usize,
+pub(crate) struct BroadcastMaskBias {
+    pub(crate) tensor: FlexTensor,
+    pub(crate) batch_step: usize,
+    pub(crate) head_step: usize,
 }
 
 /// Prepare an attention mask or bias for the inner loop, accepting ONNX Attention-23
@@ -143,7 +143,7 @@ struct BroadcastMaskBias {
 /// efficiency. If the trailing `[seq_q, seq_kv]` dims are themselves broadcast (rare in
 /// practice), we fall back to `expand` + `to_contiguous` so the tile stays contiguous
 /// in memory for the inner loop's slice-based access.
-fn broadcast_attn_mask_bias(
+pub(crate) fn broadcast_attn_mask_bias(
     tensor: FlexTensor,
     target: [usize; 4],
     name: &'static str,
@@ -193,6 +193,11 @@ pub fn attention_flash(
     attn_bias: Option<FlexTensor>,
     options: AttentionModuleOptions,
 ) -> FlexTensor {
+    if crate::ops::attention_int8::should_use(&query, &key, &value, &options) {
+        return crate::ops::attention_int8::flash_int8(
+            query, key, value, mask, attn_bias, options,
+        );
+    }
     dispatch_attention_dtype!(query, key, value, mask, attn_bias, options, attention_impl)
 }
 

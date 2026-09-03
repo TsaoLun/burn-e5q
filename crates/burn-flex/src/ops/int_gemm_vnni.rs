@@ -30,6 +30,29 @@ pub(super) fn gemm<const A_IS_U8: bool, const B_IS_I8: bool>(
     k: usize,
     zp: &Zp,
 ) -> Vec<i32> {
+    let mut c = vec![0i32; m.saturating_mul(n)];
+    gemm_into::<A_IS_U8, B_IS_I8>(a, b, m, n, k, zp, &mut c);
+    c
+}
+
+pub(super) fn gemm_into<const A_IS_U8: bool, const B_IS_I8: bool>(
+    a: &[u8],
+    b: &[u8],
+    m: usize,
+    n: usize,
+    k: usize,
+    zp: &Zp,
+    c: &mut [i32],
+) {
+    debug_assert_eq!(c.len(), m.saturating_mul(n));
+    c.fill(0);
+    if m == 0 || n == 0 || k == 0 {
+        if k == 0 {
+            super::apply_zp(c, m, n, 0, &[], &[], zp);
+        }
+        return;
+    }
+
     let da: i32 = if A_IS_U8 { 0 } else { 128 };
     let db: i32 = if B_IS_I8 { 0 } else { -128 };
     let need_sums = da != 0 || db != 0 || !zp.is_none();
@@ -37,7 +60,6 @@ pub(super) fn gemm<const A_IS_U8: bool, const B_IS_I8: bool>(
     let sum_b = need_sums.then(|| sum_cols_u8(b, k, n, B_IS_I8));
 
     let packed = pack_b::<B_IS_I8>(b, n, k);
-    let mut c = vec![0i32; m * n];
 
     #[cfg(feature = "rayon")]
     {
@@ -72,7 +94,7 @@ pub(super) fn gemm<const A_IS_U8: bool, const B_IS_I8: bool>(
                         );
                     }
                 });
-            return c;
+            return;
         }
     }
 
@@ -81,7 +103,7 @@ pub(super) fn gemm<const A_IS_U8: bool, const B_IS_I8: bool>(
         gemm_rows::<A_IS_U8>(
             a,
             &packed,
-            &mut c,
+            c,
             m,
             n,
             k,
@@ -93,7 +115,6 @@ pub(super) fn gemm<const A_IS_U8: bool, const B_IS_I8: bool>(
             sum_b.as_deref(),
         );
     }
-    c
 }
 
 /// Sum original (not VNNI-converted) values. `signed` means the bytes are `i8`.

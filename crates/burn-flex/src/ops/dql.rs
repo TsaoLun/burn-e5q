@@ -32,7 +32,7 @@ pub(crate) fn dynamic_quantize_linear(tensor: FlexTensor) -> (FlexTensor, FlexTe
     (y_t, scale_t, zp_t)
 }
 
-fn dql_u8(x: &[f32]) -> (Vec<u8>, f32, u8) {
+pub(crate) fn dql_u8(x: &[f32]) -> (Vec<u8>, f32, u8) {
     if x.is_empty() {
         return (Vec::new(), 0.0, 0);
     }

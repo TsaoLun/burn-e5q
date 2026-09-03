@@ -90,6 +90,7 @@ pub(crate) fn float_storage_as_f32(tensor: &FlexTensor) -> Cow<'_, [f32]> {
 
 pub mod activation;
 pub mod attention;
+pub(crate) mod attention_int8;
 pub mod binary;
 mod bool;
 pub mod cat;
