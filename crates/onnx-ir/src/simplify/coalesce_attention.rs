@@ -22,6 +22,21 @@ use crate::ir::{ArgType, Argument, AttributeValue, NodeType, RawNode, TensorData
 /// ```
 /// K's combined transpose merges head-split + key-transpose into one op.
 ///
+/// **Int8 e5 pattern** (`model_qint8_avx512_vnni` and similar QInt8 exports):
+/// ```text
+/// Q_f32 ─ DQL ─ Q_u8 ─┐
+///                      ├─ MatMulInteger → Cast → Mul(q_s*k_s) → Div(√d) → Add(mask) → Softmax
+/// K_f32 ─ DQL ─ K_u8 ─┘                                                              │
+///                                                                                    DQL
+/// V_f32 ─ DQL ─ V_u8 ──────────────────────── MatMulInteger ←─────────────────────────┘
+///                                                      └─ Cast → Mul(attn_s*v_s)
+/// ```
+/// Q/K/V are already f32 after the projection dequant. The integer QK/PV
+/// pair only exists to keep softmax in a quantized loop. This pass rewrites
+/// that subgraph onto Burn's f32 `attention()` so flex flash can skip the
+/// materialized `[heads,S,S]` score / softmax / DQL tensors. Runtime DQL
+/// scales are not folded into `Attention.scale`.
+///
 /// This pass recognizes the pattern and replaces it with a single Attention RawNode,
 /// enabling Burn's optimized attention primitives. Orphaned nodes are cleaned up by
 /// dead node elimination.
@@ -101,6 +116,15 @@ fn try_match_sdpa(
     let axis = get_softmax_axis(softmax, rank)?;
     if axis != rank - 1 {
         return None;
+    }
+
+    // Int8 e5-style SDPA (MatMulInteger + DQL) before the f32 MatMul path.
+    // Q/K/V are already f32 after the projection dequant + head split; the
+    // integer QK/PV pair only exists to keep softmax in a quantized loop.
+    // Coalescing onto Burn's f32 `attention()` lets flex flash attention
+    // skip the materialized `[heads,S,S]` score/softmax/DQL tensors.
+    if let Some(matched) = try_match_int8_sdpa(softmax_idx, nodes, producer, consumer) {
+        return Some(matched);
     }
 
     // 2. Trace backward from Softmax input through optional Add(mask) and Div/Mul(scale)
@@ -389,6 +413,298 @@ fn build_attention_node(
         outputs: final_matmul.outputs.clone(),
         attrs,
     }
+}
+
+/// Match the int8 SDPA used by `model_qint8_avx512_vnni` (and similar
+/// QInt8 transformer exports):
+///
+/// ```text
+/// Q_f32 ─ DQL ─ Q_u8 ─┐
+///                      ├─ MatMulInteger → Cast → Mul(q_s*k_s) → Div(√d) → Add(mask) → Softmax
+/// K_f32 ─ DQL ─ K_u8 ─┘                                                              │
+///                                                                                    DQL
+/// V_f32 ─ DQL ─ V_u8 ──────────────────────── MatMulInteger ←─────────────────────────┘
+///                                                      └─ Cast → Mul(attn_s*v_s)   = Y
+/// ```
+///
+/// Replaces the PV dequant Mul with an `Attention` node on the *float* Q/K/V
+/// (the DQL inputs). K is often stored as `[B,H,D,S]`; a corrective transpose
+/// restores `[B,H,S,D]` for Burn's attention primitive. Runtime DQL scales are
+/// *not* folded into `Attention.scale` — they belong to the integer path we
+/// are deleting.
+fn try_match_int8_sdpa(
+    softmax_idx: usize,
+    nodes: &[RawNode],
+    producer: &HashMap<String, usize>,
+    consumer: &HashMap<String, Vec<usize>>,
+) -> Option<Vec<(usize, RawNode)>> {
+    let softmax = &nodes[softmax_idx];
+    if softmax.inputs[0].ty.rank() != 4 {
+        return None;
+    }
+
+    let mut scores_name: &str = &softmax.inputs[0].name;
+    let mut mask_arg: Option<&Argument> = None;
+    let mut scale_value: Option<f64> = None;
+
+    if let Some(&add_idx) = producer.get(scores_name) {
+        let add_node = &nodes[add_idx];
+        if add_node.node_type == NodeType::Add && is_single_use(&add_node.outputs[0].name, consumer)
+        {
+            let mut found = false;
+            for (up, mask_i) in [(0usize, 1usize), (1, 0)] {
+                if traces_to_matmul_integer(&add_node.inputs[up].name, nodes, producer, consumer) {
+                    mask_arg = Some(&add_node.inputs[mask_i]);
+                    scores_name = &add_node.inputs[up].name;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return None;
+            }
+        }
+    }
+
+    if let Some(&scale_idx) = producer.get(scores_name) {
+        let scale_node = &nodes[scale_idx];
+        if let Some((upstream, sv)) = try_extract_scale(scale_node, consumer) {
+            scores_name = upstream;
+            scale_value = Some(sv);
+        } else if scale_node.node_type == NodeType::Div
+            && scale_node.inputs.len() >= 1
+            && is_single_use(&scale_node.outputs[0].name, consumer)
+        {
+            // √d is sometimes a rank-1 initializer whose value is not yet
+            // attached when this pass first runs. Peel the Div and let
+            // Attention's default `1/sqrt(head_dim)` stand — for e5 that
+            // *is* the divisor.
+            scores_name = &scale_node.inputs[0].name;
+        }
+    }
+
+    let qk_mmi_idx = skip_int8_dequant_to_mmi(scores_name, nodes, producer, consumer)?;
+    let qk_mmi = &nodes[qk_mmi_idx];
+    if qk_mmi.inputs.len() < 2 {
+        return None;
+    }
+
+    let q_f32 = dql_float_input(&qk_mmi.inputs[0].name, nodes, producer)?;
+    let k_f32 = dql_float_input(&qk_mmi.inputs[1].name, nodes, producer)?;
+    if q_f32.ty.rank() != 4 || k_f32.ty.rank() != 4 {
+        return None;
+    }
+
+    let softmax_output = &softmax.outputs[0].name;
+    let dql_consumers = consumer.get(softmax_output)?;
+    if dql_consumers.len() != 1 {
+        return None;
+    }
+    let attn_dql = &nodes[dql_consumers[0]];
+    if attn_dql.node_type != NodeType::DynamicQuantizeLinear {
+        return None;
+    }
+    let attn_u8 = &attn_dql.outputs[0].name;
+    let pv_consumers = consumer.get(attn_u8)?;
+    if pv_consumers.len() != 1 {
+        return None;
+    }
+    let pv_mmi = &nodes[pv_consumers[0]];
+    if pv_mmi.node_type != NodeType::MatMulInteger || pv_mmi.inputs.len() < 2 {
+        return None;
+    }
+    if pv_mmi.inputs[0].name != *attn_u8 {
+        return None;
+    }
+    let v_f32 = dql_float_input(&pv_mmi.inputs[1].name, nodes, producer)?;
+    if v_f32.ty.rank() != 4 {
+        return None;
+    }
+
+    let final_mul_idx = skip_cast_to_dequant_mul(&pv_mmi.outputs[0].name, nodes, producer, consumer)?;
+    let final_mul = &nodes[final_mul_idx];
+
+    let (k_arg, extra) =
+        correct_k_layout_if_needed(q_f32, k_f32, qk_mmi_idx, qk_mmi, nodes, producer);
+
+    // `None` omits the attribute → Burn / ONNX default `1/sqrt(head_dim)`.
+    // Do not invent `Some(1.0)`: that would drop e5's Div(√32) when the
+    // constant is not yet visible and silently unscale the scores.
+    let attention_node =
+        build_attention_node(final_mul, q_f32, &k_arg, v_f32, mask_arg, scale_value);
+
+    log::info!(
+        "Simplification: coalescing int8 SDPA into Attention node '{}' (scale: {:?})",
+        attention_node.name,
+        scale_value
+    );
+
+    let mut replacements = extra;
+    replacements.push((final_mul_idx, attention_node));
+    Some(replacements)
+}
+
+fn traces_to_matmul_integer(
+    name: &str,
+    nodes: &[RawNode],
+    producer: &HashMap<String, usize>,
+    consumer: &HashMap<String, Vec<usize>>,
+) -> bool {
+    skip_int8_dequant_to_mmi(name, nodes, producer, consumer).is_some()
+}
+
+/// Peel `Div/Mul(const)` then `Mul(runtime dequant) → Cast → MatMulInteger`.
+/// Returns the MatMulInteger node index.
+fn skip_int8_dequant_to_mmi<'a>(
+    mut name: &'a str,
+    nodes: &'a [RawNode],
+    producer: &HashMap<String, usize>,
+    consumer: &HashMap<String, Vec<usize>>,
+) -> Option<usize> {
+    if let Some(&idx) = producer.get(name) {
+        let node = &nodes[idx];
+        if let Some((upstream, _)) = try_extract_scale(node, consumer) {
+            name = upstream;
+        } else if node.node_type == NodeType::Div
+            && node.inputs.len() >= 1
+            && is_single_use(&node.outputs[0].name, consumer)
+        {
+            name = &node.inputs[0].name;
+        }
+    }
+
+    if let Some(&idx) = producer.get(name) {
+        let node = &nodes[idx];
+        if node.node_type == NodeType::Mul && is_single_use(&node.outputs[0].name, consumer) {
+            // Runtime dequant scale (q_s*k_s): pick the side that reaches Cast/MMI.
+            for inp in &node.inputs {
+                if let Some(mmi) = peel_cast_to_mmi(&inp.name, nodes, producer, consumer) {
+                    return Some(mmi);
+                }
+            }
+        }
+    }
+
+    peel_cast_to_mmi(name, nodes, producer, consumer)
+}
+
+fn peel_cast_to_mmi(
+    name: &str,
+    nodes: &[RawNode],
+    producer: &HashMap<String, usize>,
+    consumer: &HashMap<String, Vec<usize>>,
+) -> Option<usize> {
+    let mut cur = name;
+    if let Some(&idx) = producer.get(cur) {
+        let node = &nodes[idx];
+        if node.node_type == NodeType::Cast && is_single_use(&node.outputs[0].name, consumer) {
+            cur = &node.inputs[0].name;
+        }
+    }
+    let idx = *producer.get(cur)?;
+    if nodes[idx].node_type == NodeType::MatMulInteger {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
+fn dql_float_input<'a>(
+    quantized_name: &str,
+    nodes: &'a [RawNode],
+    producer: &HashMap<String, usize>,
+) -> Option<&'a Argument> {
+    let idx = *producer.get(quantized_name)?;
+    let dql = &nodes[idx];
+    if dql.node_type != NodeType::DynamicQuantizeLinear {
+        return None;
+    }
+    dql.inputs.first()
+}
+
+/// PV integer GEMM is followed by Cast → Mul(runtime scale). That Mul is Y.
+fn skip_cast_to_dequant_mul(
+    mmi_out: &str,
+    nodes: &[RawNode],
+    _producer: &HashMap<String, usize>,
+    consumer: &HashMap<String, Vec<usize>>,
+) -> Option<usize> {
+    let consumers = consumer.get(mmi_out)?;
+    if consumers.len() != 1 {
+        return None;
+    }
+    let mut idx = consumers[0];
+    if nodes[idx].node_type == NodeType::Cast && is_single_use(&nodes[idx].outputs[0].name, consumer)
+    {
+        let cast_out = &nodes[idx].outputs[0].name;
+        let next = consumer.get(cast_out)?;
+        if next.len() != 1 {
+            return None;
+        }
+        idx = next[0];
+    }
+    if nodes[idx].node_type == NodeType::Mul {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
+/// If K is `[B,H,D,S]` (last-two-swapped vs Q's transpose), emit a corrective
+/// `[0,1,3,2]` Transpose in the QK MatMulInteger slot.
+fn correct_k_layout_if_needed(
+    q_f32: &Argument,
+    k_f32: &Argument,
+    qk_mmi_idx: usize,
+    qk_mmi: &RawNode,
+    nodes: &[RawNode],
+    producer: &HashMap<String, usize>,
+) -> (Argument, Vec<(usize, RawNode)>) {
+    let q_perm = producer
+        .get(&q_f32.name)
+        .and_then(|&i| get_transpose_perm(&nodes[i]));
+    let k_perm = producer
+        .get(&k_f32.name)
+        .and_then(|&i| get_transpose_perm(&nodes[i]));
+
+    let needs_fix = match (q_perm.as_deref(), k_perm.as_deref()) {
+        (Some(q), Some(k)) => is_perm_with_last_two_swapped(q, k),
+        _ => false,
+    };
+    if !needs_fix {
+        return (k_f32.clone(), vec![]);
+    }
+
+    let corrected_k_name = format!("{}_k_corrected", qk_mmi.name);
+    let mut k_output = k_f32.clone();
+    k_output.name = corrected_k_name.clone();
+    k_output.value_store = None;
+    if let ArgType::Tensor(ref mut tt) = k_output.ty
+        && let Some(ref mut shape) = tt.static_shape
+    {
+        let len = shape.len();
+        if len >= 2 {
+            shape.swap(len - 1, len - 2);
+        }
+    }
+
+    let rank = k_f32.ty.rank();
+    let mut corrective_perm: Vec<i64> = (0..rank as i64).collect();
+    if rank >= 2 {
+        corrective_perm.swap(rank - 1, rank - 2);
+    }
+
+    let corrective_transpose = RawNode {
+        custom_identity: None,
+        node_type: NodeType::Transpose,
+        name: format!("{}_k_correct", qk_mmi.name),
+        inputs: vec![k_f32.clone()],
+        outputs: vec![k_output.clone()],
+        attrs: [("perm".to_string(), AttributeValue::Int64s(corrective_perm))]
+            .into_iter()
+            .collect(),
+    };
+    (k_output, vec![(qk_mmi_idx, corrective_transpose)])
 }
 
 /// Get the normalized Softmax axis (positive index).
@@ -1643,6 +1959,211 @@ mod tests {
         assert!(
             !result.iter().any(|n| n.node_type == NodeType::Attention),
             "should not match when scales are dynamic (non-constant)"
+        );
+    }
+
+    fn tensor4_dtype(name: &str, dtype: DType) -> Argument {
+        Argument {
+            name: name.to_string(),
+            ty: ArgType::Tensor(TensorType {
+                dtype,
+                rank: 4,
+                static_shape: None,
+            }),
+            value_source: ValueSource::Dynamic,
+            value_store: None,
+        }
+    }
+
+    fn dql_node(name: &str, input: &str, y: &str, scale: &str, zp: &str) -> RawNode {
+        RawNode {
+            custom_identity: None,
+            node_type: NodeType::DynamicQuantizeLinear,
+            name: name.to_string(),
+            inputs: vec![tensor4(input)],
+            outputs: vec![
+                tensor4_dtype(y, DType::U8),
+                Argument {
+                    name: scale.to_string(),
+                    ty: ArgType::Tensor(TensorType {
+                        dtype: DType::F32,
+                        rank: 0,
+                        static_shape: None,
+                    }),
+                    value_source: ValueSource::Dynamic,
+                    value_store: None,
+                },
+                Argument {
+                    name: zp.to_string(),
+                    ty: ArgType::Tensor(TensorType {
+                        dtype: DType::U8,
+                        rank: 0,
+                        static_shape: None,
+                    }),
+                    value_source: ValueSource::Dynamic,
+                    value_store: None,
+                },
+            ],
+            attrs: Default::default(),
+        }
+    }
+
+    fn mmi_node(name: &str, a: &str, b: &str, output: &str) -> RawNode {
+        RawNode {
+            custom_identity: None,
+            node_type: NodeType::MatMulInteger,
+            name: name.to_string(),
+            inputs: vec![tensor4_dtype(a, DType::U8), tensor4_dtype(b, DType::U8)],
+            outputs: vec![tensor4_dtype(output, DType::I32)],
+            attrs: Default::default(),
+        }
+    }
+
+    fn cast_node(name: &str, input: &str, output: &str) -> RawNode {
+        RawNode {
+            custom_identity: None,
+            node_type: NodeType::Cast,
+            name: name.to_string(),
+            inputs: vec![tensor4_dtype(input, DType::I32)],
+            outputs: vec![tensor4(output)],
+            attrs: Default::default(),
+        }
+    }
+
+    /// e5-style int8 SDPA: Transpose Q/K/V + 3×DQL + MMI + Cast + Mul + Div + Add + Softmax + DQL + MMI + Cast + Mul.
+    fn build_int8_sdpa(scale: Option<Argument>, shared_mask: bool) -> Vec<RawNode> {
+        let mut nodes = vec![
+            transpose_node("transpose_q", "q_in", "q", vec![0, 2, 1, 3]),
+            transpose_node("transpose_k", "k_in", "k", vec![0, 2, 3, 1]),
+            transpose_node("transpose_v", "v_in", "v", vec![0, 2, 1, 3]),
+            dql_node("dql_q", "q", "q_u8", "q_s", "q_zp"),
+            dql_node("dql_k", "k", "k_u8", "k_s", "k_zp"),
+            dql_node("dql_v", "v", "v_u8", "v_s", "v_zp"),
+            mmi_node("qk_mmi", "q_u8", "k_u8", "qk_i32"),
+            cast_node("cast_qk", "qk_i32", "qk_f"),
+            binary_node(
+                "mul_dequant_qk",
+                NodeType::Mul,
+                tensor4("qk_f"),
+                dynamic_scalar("qk_scale"),
+                "qk_dq",
+            ),
+        ];
+        let softmax_in = if let Some(scale) = scale {
+            nodes.push(binary_node(
+                "div_scale",
+                NodeType::Div,
+                tensor4("qk_dq"),
+                scale,
+                "qk_scaled",
+            ));
+            nodes.push(binary_node(
+                "add_mask",
+                NodeType::Add,
+                tensor4("qk_scaled"),
+                tensor4("mask"),
+                "qk_masked",
+            ));
+            "qk_masked"
+        } else {
+            nodes.push(binary_node(
+                "add_mask",
+                NodeType::Add,
+                tensor4("qk_dq"),
+                tensor4("mask"),
+                "qk_masked",
+            ));
+            "qk_masked"
+        };
+        nodes.push(softmax_node("softmax", softmax_in, "attn_weights", 3));
+        nodes.push(dql_node(
+            "dql_attn",
+            "attn_weights",
+            "attn_u8",
+            "attn_s",
+            "attn_zp",
+        ));
+        nodes.push(mmi_node("pv_mmi", "attn_u8", "v_u8", "pv_i32"));
+        nodes.push(cast_node("cast_pv", "pv_i32", "pv_f"));
+        nodes.push(binary_node(
+            "mul_dequant_pv",
+            NodeType::Mul,
+            tensor4("pv_f"),
+            dynamic_scalar("pv_scale"),
+            "output",
+        ));
+        if shared_mask {
+            nodes.push(node("other_mask_use", NodeType::Relu, &["mask"], &["mask_relu"]));
+        }
+        nodes
+    }
+
+    #[test]
+    fn test_int8_sdpa_e5_pattern() {
+        let nodes = build_int8_sdpa(Some(const_f32("sqrt_d", 5.656854)), false);
+        let result = coalesce_attention(nodes);
+
+        let attention = result
+            .iter()
+            .find(|n| n.node_type == NodeType::Attention)
+            .expect("should coalesce int8 SDPA into Attention");
+
+        assert_eq!(attention.inputs[0].name, "q");
+        assert_eq!(attention.inputs[2].name, "v");
+        assert_eq!(attention.outputs[0].name, "output");
+        assert_eq!(attention.inputs.len(), 4);
+        assert_eq!(attention.inputs[3].name, "mask");
+
+        // K is stored as [B,H,D,S] (perm [0,2,3,1]); a corrective transpose
+        // restores [B,H,S,D] for Burn's attention primitive.
+        let k_name = &attention.inputs[1].name;
+        assert_ne!(k_name, "k", "K must go through a corrective transpose");
+        let corrective = result
+            .iter()
+            .find(|n| n.node_type == NodeType::Transpose && n.outputs[0].name == *k_name)
+            .expect("corrective K transpose");
+        assert_eq!(corrective.inputs[0].name, "k");
+        let perm = corrective.attrs.get("perm").unwrap().clone().into_i64s();
+        assert_eq!(perm, vec![0, 1, 3, 2]);
+
+        let scale = attention.attrs.get("scale").unwrap().clone().into_f32();
+        assert!((scale - (1.0 / 5.656854)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_int8_sdpa_shared_mask_still_matches() {
+        let nodes = build_int8_sdpa(Some(const_f32("sqrt_d", 5.656854)), true);
+        let result = coalesce_attention(nodes);
+        assert!(
+            result.iter().any(|n| n.node_type == NodeType::Attention),
+            "mask is graph-level shared across layers; must not require single-use"
+        );
+    }
+
+    #[test]
+    fn test_int8_sdpa_dynamic_div_uses_default_scale() {
+        // Divisor not yet a folded constant (e5 first simplify iteration).
+        let nodes = build_int8_sdpa(Some(dynamic_scalar("sqrt_d")), false);
+        let result = coalesce_attention(nodes);
+        let attention = result
+            .iter()
+            .find(|n| n.node_type == NodeType::Attention)
+            .expect("should still match when Div scale is not a static value");
+        assert!(
+            !attention.attrs.contains_key("scale"),
+            "missing static Div should omit scale so Attention uses 1/sqrt(head_dim)"
+        );
+    }
+
+    #[test]
+    fn test_int8_sdpa_no_match_without_softmax_dql() {
+        let mut nodes = build_int8_sdpa(Some(const_f32("sqrt_d", 5.656854)), false);
+        nodes.retain(|n| n.node_type != NodeType::DynamicQuantizeLinear || n.name != "dql_attn");
+        // Softmax now feeds nothing that looks like DQL → PV MMI.
+        let result = coalesce_attention(nodes);
+        assert!(
+            !result.iter().any(|n| n.node_type == NodeType::Attention),
+            "should not match when softmax is not followed by DQL + MatMulInteger"
         );
     }
 }
