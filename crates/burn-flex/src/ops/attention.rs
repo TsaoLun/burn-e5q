@@ -37,12 +37,16 @@ const TILE_KV: usize = 64;
 /// Naive attention materializes a [seq_q, seq_kv] score matrix per head.
 /// When this exceeds the budget, flash attention is used instead.
 /// 256K elements = 1 MB for f32, fits comfortably in L2.
+///
+/// 512-token e5 is exactly 512×512 = 256K. That shape is the ORT gap we
+/// are closing (12 heads × 12 layers of `[S,S]`), so it must take flash.
 const NAIVE_SCORE_BUDGET: usize = 256 * 1024;
 
 /// Auto-selecting attention: picks the fastest strategy based on sequence length.
 ///
-/// Uses naive attention when the score matrix (seq_q * seq_kv) fits within
-/// `NAIVE_SCORE_BUDGET`. Falls back to flash attention for larger shapes.
+/// Uses naive attention when the score matrix (seq_q * seq_kv) is strictly
+/// smaller than `NAIVE_SCORE_BUDGET`. Equal-or-larger shapes (including
+/// 512×512 e5) use flash attention.
 pub fn attention(
     query: FlexTensor,
     key: FlexTensor,
@@ -63,7 +67,7 @@ pub fn attention(
     );
     let seq_q = query.layout().shape()[2];
     let seq_kv = key.layout().shape()[2];
-    if seq_q * seq_kv <= NAIVE_SCORE_BUDGET {
+    if seq_q * seq_kv < NAIVE_SCORE_BUDGET {
         return attention_naive(query, key, value, mask, attn_bias, options);
     }
     attention_flash(query, key, value, mask, attn_bias, options)
@@ -1116,7 +1120,7 @@ mod tests {
     fn test_flash_bias_broadcast_across_batch_and_heads() {
         // Exercises the flash path for a `[1, 1, seq_q, seq_kv]` broadcast
         // bias. The dispatcher in `attention()` routes to naive for
-        // `seq_q * seq_kv <= NAIVE_SCORE_BUDGET` (and the backend-tests
+        // `seq_q * seq_kv < NAIVE_SCORE_BUDGET` (and the backend-tests
         // attention suite uses small shapes), so the flash entry needs a
         // direct call to stay covered. General broadcast semantics for the
         // main `attention()` path live in
