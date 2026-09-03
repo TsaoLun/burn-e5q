@@ -20,9 +20,9 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 
 | Crate | Source | Current pin |
 |---|---|---|
-| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-int8-attn` | `f78e156bd46dde41f822c77f3209290157c5a9b4` |
+| `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-gelu-ln` | `c0f9a6dec3802101ad145421f23377aa1d892459` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-flash-par-heads` | `fd4f793165d7741ee028fa7a2f542dd252181b2e` |
+| `burn`, `burn-store` | this repo `vendor/burn-flex-par-gelu` | `319336c141cd1bda4e9d35024a32130774da9a44` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -59,7 +59,10 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
    `attention()`; flex sends 512×512 through flash and parallelizes heads
    (`vendor/burn-onnx-coalesce-int8-attn` `f78e156` +
    `vendor/burn-flash-par-heads` `fd4f793`).
-7. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+7. **fused GELU / LayerNorm** — coalesce the expanded erf-GELU and last-axis
+   LN subgraphs; flex parallelizes large f32 `gelu` (`vendor/burn-onnx-coalesce-gelu-ln`
+   `c0f9a6d` + `vendor/burn-flex-par-gelu` `319336c`).
+8. **Re-bench** — `cargo run --release -p e5-embed --features cpu --no-default-features --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 

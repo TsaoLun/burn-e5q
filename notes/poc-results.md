@@ -378,3 +378,15 @@ Rust ort 53.8 ms 只有 `session.run`。公平模型倍数是 **12×**，不是 
 639 ms 被隔离块加总对上（差 1%）：MMI 228（36%）+ flash 205（32%）+ 展开 GELU 117（18%）+ LN 44 + DQL 33。
 
 下一刀打模型内这三块（整层融合 / int8 flash / GEMM），不要再当「生成图税」或再调 flash TILE。`compare_ort` 的 512 行已拆 tokenize / `forward_raw`。
+
+---
+
+# 融 GELU / LayerNorm
+
+> 日期：2026-09-03。同一台 4 核 Xeon。
+> 栈：`vendor/burn-onnx-coalesce-gelu-ln` `c0f9a6d` + `vendor/burn-flex-par-gelu` `319336c`。
+> 实现：`notes/flex-gelu-ln.md`。
+
+codegen 把展开 erf-GELU / 最后一维 LN 收成 `activation::gelu` 和 `nn::LayerNorm`。
+flex 大 GELU 走 rayon（仍是 `libm::erff`）。对拍数字待 `compare_ort` 写入。
+预期模型 639 → 480–520 ms；读数用 `forward_raw`，不要用含 sentencepiece 的 `embed_passages`。

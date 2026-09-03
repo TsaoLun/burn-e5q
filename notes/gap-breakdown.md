@@ -92,14 +92,17 @@ dummy 权重显式 U8×I8，走线上同一条 VNNI。flex eager，`black_box` �
 
 只谈**模型** 639 → ~108 ms（2× ORT）。tokenizer 另案。
 
-1. **整层 / FFN 融合（MMI + GELU + LN + DQL）**  
+1. **先收 FFN 侧面：GELU + LN**（本刀，`notes/flex-gelu-ln.md`）  
+   展开 GELU 117 + LN 44 = **161 ms（25%）**。整层 MMI+DQL 糊上是后面的事；
+   这一刀只把 erf / mean-var 收成 flex 融合 kernel。
+2. **整层 / FFN 融合（MMI + GELU + LN + DQL）**  
    这四块合计 **423 ms（66%）**。ORT 赢在 epilogue 融进 GEMM，不是某一个 kernel 再快 10%。
-2. **路线 C：int8 flash**  
+3. **路线 C：int8 flash**  
    205 ms f32 flash @ 12 GOPS。按现在 VNNI 的 44 GOPS 估 QK+PV ≈ 5–20 ms。能啃掉 ~30% 模型，**单独不够**到 2×。
-3. **MMI 本身再快**（打包、AMX、QKV 合并）  
+4. **MMI 本身再快**（打包、AMX、QKV 合并）  
    228 ms @ 44 GOPS。不提速 GEMM，1+2 做完也还剩 ~200 ms 量级。
-4. **计量**  
-   `compare_ort` 的 512 行应拆 tokenize / `forward_raw`。本 PR 已加。不要再用 1.12 s 当模型基线。
+5. **计量**  
+   `compare_ort` 的 512 行应拆 tokenize / `forward_raw`。#8 已加。不要再用 1.12 s 当模型基线。
 
 **不要**再调 flash TILE / gemm 并行。**不要**再融单个 DQL。**不要**在 #6 上叠 C。
 
