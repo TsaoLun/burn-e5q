@@ -337,7 +337,6 @@ where
     let v_head_stride = seq_kv * val_dim;
     let v_batch_stride = kv_heads * v_head_stride;
     let o_head_stride = seq_q * val_dim;
-    let o_batch_stride = heads * o_head_stride;
     let mask_tile_len = seq_q * seq_kv;
 
     let params = AttentionParams {
@@ -350,36 +349,37 @@ where
         val_dim,
     };
 
-    // Allocate scratch buffers once and reuse across all (batch, head) pairs
-    let mut scratch = ScratchBuffers {
-        row_max: vec![T::neg_infinity(); seq_q],
-        row_sum: vec![T::zero(); seq_q],
-        scores: vec![T::zero(); seq_q * TILE_KV],
+    let strides = HeadStrides {
+        q_per_kv,
+        q_batch_stride,
+        q_head_stride,
+        k_batch_stride,
+        k_head_stride,
+        v_batch_stride,
+        v_head_stride,
+        o_head_stride,
+        mask_batch_step,
+        mask_head_step,
+        bias_batch_step,
+        bias_head_step,
+        mask_tile_len,
     };
 
-    for b in 0..batch {
-        for h in 0..heads {
-            // Map query head `h` to its shared K/V head (GQA/MQA).
-            let kv_h = h / q_per_kv;
-            let q_off = b * q_batch_stride + h * q_head_stride;
-            let k_off = b * k_batch_stride + kv_h * k_head_stride;
-            let v_off = b * v_batch_stride + kv_h * v_head_stride;
-            let o_off = b * o_batch_stride + h * o_head_stride;
-            let mask_off = b * mask_batch_step + h * mask_head_step;
-            let bias_off = b * bias_batch_step + h * bias_head_step;
-
-            flash_attention_head(
-                &q_data[q_off..q_off + q_head_stride],
-                &k_data[k_off..k_off + k_head_stride],
-                &v_data[v_off..v_off + v_head_stride],
-                &mut output[o_off..o_off + o_head_stride],
-                mask_data.map(|m| &m[mask_off..mask_off + mask_tile_len]),
-                bias_data.map(|b| &b[bias_off..bias_off + mask_tile_len]),
-                &params,
-                &mut scratch,
-            );
-        }
-    }
+    // e5 is 12 heads; running them serially leaves 3 of 4 cores idle.
+    // Each head writes a disjoint output slice, so `par_chunks_mut` needs
+    // no extra unsafe. Gemm stays `Parallelism::None` to avoid nested rayon.
+    run_flash_heads(
+        batch,
+        heads,
+        q_data,
+        k_data,
+        v_data,
+        &mut output,
+        mask_data,
+        bias_data,
+        &params,
+        &strides,
+    );
 
     let shape = burn_std::Shape::from(vec![batch, heads, seq_q, val_dim]);
     FlexTensor::new(
@@ -393,7 +393,7 @@ where
 ///
 /// Wraps `gemm::gemm` for f32 and f64 so `flash_attention_head` stays generic.
 /// Convention: dst = alpha * dst + beta * (lhs @ rhs)
-trait FlashGemm: Float + Pod + Copy + core::ops::AddAssign {
+trait FlashGemm: Float + Pod + Copy + core::ops::AddAssign + Send + Sync {
     /// Block matrix multiply used for score and value matmuls.
     ///
     /// # Safety
@@ -460,6 +460,115 @@ struct ScratchBuffers<T> {
     row_max: Vec<T>,
     row_sum: Vec<T>,
     scores: Vec<T>,
+}
+
+impl<T: Float> ScratchBuffers<T> {
+    fn new(seq_q: usize) -> Self {
+        Self {
+            row_max: vec![T::neg_infinity(); seq_q],
+            row_sum: vec![T::zero(); seq_q],
+            scores: vec![T::zero(); seq_q * TILE_KV],
+        }
+    }
+}
+
+/// Layout offsets for one (batch, head) flash task.
+struct HeadStrides {
+    q_per_kv: usize,
+    q_batch_stride: usize,
+    q_head_stride: usize,
+    k_batch_stride: usize,
+    k_head_stride: usize,
+    v_batch_stride: usize,
+    v_head_stride: usize,
+    o_head_stride: usize,
+    mask_batch_step: usize,
+    mask_head_step: usize,
+    bias_batch_step: usize,
+    bias_head_step: usize,
+    mask_tile_len: usize,
+}
+
+fn flash_one_head<T: FlashGemm>(
+    b: usize,
+    h: usize,
+    q_data: &[T],
+    k_data: &[T],
+    v_data: &[T],
+    out_head: &mut [T],
+    mask_data: Option<&[u8]>,
+    bias_data: Option<&[T]>,
+    params: &AttentionParams<T>,
+    s: &HeadStrides,
+    scratch: &mut ScratchBuffers<T>,
+) {
+    let kv_h = h / s.q_per_kv;
+    let q_off = b * s.q_batch_stride + h * s.q_head_stride;
+    let k_off = b * s.k_batch_stride + kv_h * s.k_head_stride;
+    let v_off = b * s.v_batch_stride + kv_h * s.v_head_stride;
+    let mask_off = b * s.mask_batch_step + h * s.mask_head_step;
+    let bias_off = b * s.bias_batch_step + h * s.bias_head_step;
+    flash_attention_head(
+        &q_data[q_off..q_off + s.q_head_stride],
+        &k_data[k_off..k_off + s.k_head_stride],
+        &v_data[v_off..v_off + s.v_head_stride],
+        out_head,
+        mask_data.map(|m| &m[mask_off..mask_off + s.mask_tile_len]),
+        bias_data.map(|b| &b[bias_off..bias_off + s.mask_tile_len]),
+        params,
+        scratch,
+    );
+}
+
+fn run_flash_heads<T: FlashGemm>(
+    batch: usize,
+    heads: usize,
+    q_data: &[T],
+    k_data: &[T],
+    v_data: &[T],
+    output: &mut [T],
+    mask_data: Option<&[u8]>,
+    bias_data: Option<&[T]>,
+    params: &AttentionParams<T>,
+    strides: &HeadStrides,
+) {
+    #[cfg(feature = "rayon")]
+    if batch * heads > 1 {
+        use rayon::prelude::*;
+        output
+            .par_chunks_mut(strides.o_head_stride)
+            .enumerate()
+            .for_each(|(idx, out_head)| {
+                let b = idx / heads;
+                let h = idx % heads;
+                let mut scratch = ScratchBuffers::new(params.seq_q);
+                flash_one_head(
+                    b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, params, strides,
+                    &mut scratch,
+                );
+            });
+        return;
+    }
+
+    let mut scratch = ScratchBuffers::new(params.seq_q);
+    for b in 0..batch {
+        for h in 0..heads {
+            let o_off = b * heads * strides.o_head_stride + h * strides.o_head_stride;
+            flash_one_head(
+                b,
+                h,
+                q_data,
+                k_data,
+                v_data,
+                &mut output[o_off..o_off + strides.o_head_stride],
+                mask_data,
+                bias_data,
+                params,
+                strides,
+                &mut scratch,
+            );
+        }
+    }
 }
 
 /// Parameters for a single (batch, head) flash attention computation.
@@ -1108,6 +1217,39 @@ mod tests {
     fn test_attention_gqa_matches_repeated_kv() {
         // 4 query heads, 2 KV heads: each KV head shared by 2 query heads.
         check_grouped_attention(4, 2);
+    }
+
+    #[test]
+    fn test_flash_12_heads_matches_naive() {
+        // e5 head count. Direct `attention_flash` so the rayon head-split
+        // runs even though 8×8 scores would take the naive dispatcher.
+        let batch = 2;
+        let heads = 12;
+        let seq = 8;
+        let dim = 32;
+        let n = batch * heads * seq * dim;
+        let q = flex_f32(
+            (0..n).map(|i| (i as f32 * 0.03).sin()).collect(),
+            &[batch, heads, seq, dim],
+        );
+        let k = flex_f32(
+            (0..n).map(|i| (i as f32 * 0.05).cos()).collect(),
+            &[batch, heads, seq, dim],
+        );
+        let v = flex_f32(
+            (0..n).map(|i| (i as f32 * 0.07).sin()).collect(),
+            &[batch, heads, seq, dim],
+        );
+        let flash = super::attention_flash(
+            q.clone(),
+            k.clone(),
+            v.clone(),
+            None,
+            None,
+            Default::default(),
+        );
+        let naive = super::attention_naive(q, k, v, None, None, Default::default());
+        assert_attention_outputs_close(flash.storage(), naive.storage(), "flash-12h vs naive");
     }
 
     #[test]
