@@ -12,7 +12,8 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use burn::prelude::*;
-use burn::tensor::module::attention;
+use burn::tensor::activation::gelu;
+use burn::tensor::module::{attention, layer_norm};
 use burn::tensor::ops::AttentionModuleOptions;
 use burn::tensor::{DType, Distribution, TensorData};
 
@@ -292,8 +293,14 @@ fn run_shape(device: &Device, shapes: &Shapes, repeats: usize) -> ShapeResult {
     let ln_ms = time_ln(device, shapes, repeats);
     print_row(&format!("expanded LN ×25 ({seq})"), ln_ms, 25, None);
 
+    let ln_fused_ms = time_fused_ln(device, shapes, repeats);
+    print_row(&format!("fused LN ×25 ({seq})"), ln_fused_ms, 25, None);
+
     let gelu_ms = time_gelu(device, shapes, repeats);
     print_row(&format!("expanded GELU ×12 ({seq})"), gelu_ms, 12, None);
+
+    let gelu_fused_ms = time_fused_gelu(device, shapes, repeats);
+    print_row(&format!("fused GELU ×12 ({seq})"), gelu_fused_ms, 12, None);
 
     let dequant_ms = time_dequant(device, shapes, repeats);
     print_row(&format!("MMI dequant ×72 ({seq})"), dequant_ms, 72, None);
@@ -526,6 +533,31 @@ fn expanded_gelu(x: Tensor<3>, inv_sqrt2: &Tensor<1>, one: &Tensor<1>, half: &Te
         .add(one.clone().unsqueeze_dims(&[0isize, 1isize]));
     x.mul(e)
         .mul(half.clone().unsqueeze_dims(&[0isize, 1isize]))
+}
+
+fn time_fused_ln(device: &Device, shapes: &Shapes, repeats: usize) -> (f64, f64) {
+    let x = f32_tensor(shapes.hidden, -2.0, 2.0, device);
+    let gamma = vec_hidden(1.0, device);
+    let beta = vec_hidden(0.0, device);
+    time_pair(repeats, || {
+        for _ in 0..25 {
+            black_box(layer_norm(
+                x.clone(),
+                gamma.clone(),
+                Some(beta.clone()),
+                1e-12,
+            ));
+        }
+    })
+}
+
+fn time_fused_gelu(device: &Device, shapes: &Shapes, repeats: usize) -> (f64, f64) {
+    let x = f32_tensor(shapes.ffn, -2.0, 2.0, device);
+    time_pair(repeats, || {
+        for _ in 0..12 {
+            black_box(gelu(x.clone()));
+        }
+    })
 }
 
 fn time_gelu(device: &Device, shapes: &Shapes, repeats: usize) -> (f64, f64) {
