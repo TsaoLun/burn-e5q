@@ -388,5 +388,16 @@ Rust ort 53.8 ms 只有 `session.run`。公平模型倍数是 **12×**，不是 
 > 实现：`notes/flex-gelu-ln.md`。
 
 codegen 把展开 erf-GELU / 最后一维 LN 收成 `activation::gelu` 和 `nn::LayerNorm`。
-flex 大 GELU 走 rayon（仍是 `libm::erff`）。对拍数字待 `compare_ort` 写入。
-预期模型 639 → 480–520 ms；读数用 `forward_raw`，不要用含 sentencepiece 的 `embed_passages`。
+flex 大 GELU 走 rayon（仍是 `libm::erff`）。
+
+**做成了，整网没掉。** 生成图 12× `gelu` / 25× `LayerNorm` / 0 `erf`。mean cos **0.9950**。
+隔离融合 GELU 83 vs 117、LN 22 vs 44（可省 ~56 ms），但 `forward_raw` **636 vs 639**（噪声）。
+预期 480–520 ms 落空。读数用 `forward_raw`，不要用含 sentencepiece 的 `embed_passages`。
+
+| 场景 | 融 attn + head 并行 | **融 GELU/LN** | Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok | 28.4 ms | **28.6 ms** | 2.4 ms | **12×** |
+| packed batch | 5.44 s | **5.60 s** | 936 ms | **6.0×** |
+| 512 `forward_raw` | 639 ms | **636 ms** | 53.8 ms | **11.8×** |
+
+下一刀：路线 C 整数 flash（模型 32%）和 MMI 再快（36%）。不要再调 TILE / 再融单个 DQL。
