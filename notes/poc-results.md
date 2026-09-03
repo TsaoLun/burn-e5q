@@ -293,4 +293,17 @@ Rust ort（rc.13 自带的 ORT）对 `ref_data.json` 里 Python 1.29 向量的 m
 
 ## 还剩什么
 
-512 tok 仍有 ~1.2 s 不是 GEMM 也不是 DQL：softmax、LayerNorm、eager 调度。本机 Rust ort 512 是 **54 ms**，要到 ~2× 得进 ~100 ms。融 softmax/LN，或把 DQL+MMI+反量化收成一个 op（先前档位 B）。权重侧 AMX 是另一条线。
+512 tok 仍有 ~1.2 s 不是 GEMM 也不是 DQL：softmax、LayerNorm、eager 调度。本机 Rust ort 512 是 **54 ms**，要到 ~2× 得进 ~100 ms。下一步见本文件「融合 attention」。
+
+---
+
+# 融合 attention
+
+> 日期：2026-09-03。同一台 4 核 Xeon（`avx512_vnni`）。
+> 栈：`vendor/burn-onnx-coalesce-int8-attn` `f78e156` + `vendor/burn-flash-512` `245ab35`。
+> 实现：`notes/flex-attn.md`。
+> 对拍尚未跑完；数字补在测后。
+
+## TL;DR
+
+把 e5 每层的 int8 SDPA（DQL + MatMulInteger QK/PV + Softmax）收成 Burn `attention()`，512×512 走 flex flash，不再物化 `[12,S,S]`。这是「追上 ORT」图景里提升最大的一步；用来证明或证伪「瓶颈在 `[H,S,S]`」的判断。
