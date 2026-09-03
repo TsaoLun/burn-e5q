@@ -233,10 +233,12 @@ WP1 matcher + 单测
     → 按 §2 表格读数，写 poc-results
 ```
 
-A 证伪之后 **停**。下一刀另开规划，候选只有：
+A 证伪之后 **停**。1.12 s 的拆解见 `notes/gap-breakdown.md`：
+`embed_passages` 含 457 ms sentencepiece；模型是 **639 ms / 12×** ORT，
+已被 MMI 36% + flash 32% + GELU 18% 解释。下一刀另开规划，按证据是：
 
-1. 整层执行单元（QKV + attn + FFN 一块调度）
-2. 路线 C：int8 flash（VNNI tile + online softmax）
-3. 给现有 f32 flash 换一条不慢于 VNNI QK 的 gemm
+1. 整层 / FFN 融合（MMI + GELU + LN + DQL，66% 模型）
+2. 路线 C：int8 flash（32% 模型，单独不够到 2×）
+3. MMI 本身再快（44 GOPS，228 ms 已是 ORT 整网的 4×）
 
-不要在 A 的 PR 上继续叠 C。
+不要在 A 的 PR 上继续叠 C。不要再给 f32 flash 换 gemm（#7 已证伪）。

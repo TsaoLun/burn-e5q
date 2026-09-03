@@ -25,7 +25,6 @@ mean cos **0.9946**（与串行 flash 逐 case 相同）。top-3 **2/2**。
 
 ## 判断
 
-512 只动了 3%，在噪声里。**剩下的 ~1.12 s 主要不在 flash。**
-head 并行是对的（数值没漂），但不是杠杆。不要再调 TILE / gemm 并行来追 ORT。
+512 `embed_passages` 只动了 3%，在噪声里。head 并行是对的（数值没漂），但不是杠杆。不要再调 TILE / gemm 并行。
 
-下一刀：整层执行单元（72 个 MMI + LN 的调度），或路线 C（int8 flash，把 QK 拉回 VNNI）。再啃 f32 flash 只会再动几个百分点。
+1.12 s **含 457 ms sentencepiece**。模型是 639 ms：flash 占其中 32%，不是「剩下的都不在 flash」，但也不是再调 TILE 能啃的。拆解见 `notes/gap-breakdown.md`。

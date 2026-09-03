@@ -357,10 +357,24 @@ Rust ort（rc.13 自带的 ORT）对 `ref_data.json` 里 Python 1.29 向量的 m
 
 flash 的 12 个 head 改成 rayon 并行。数值与串行 flash 完全一致。
 **512 1.15 s → 1.12 s（3%）**，4×512 HWM 仍是 278 MB。
-剩下的时间不在 flash。不要再调 TILE / gemm 并行。
+`embed_passages` 的 1.12 s **含 sentencepiece**；模型本体见下一节。不要再调 TILE / gemm 并行。
 
 | 场景 | 融合 attn | **head 并行** | Rust ort | 倍数 |
 |---|---:|---:|---:|---:|
 | 16 tok | 29.5 ms | **28.4 ms** | 2.4 ms | **12×** |
 | packed batch | 5.57 s | **5.44 s** | 936 ms | **5.8×** |
-| 512 tok | 1.15 s | **1.12 s** | 53.8 ms | **21×** |
+| 512 tok（含 tokenize） | 1.15 s | **1.12 s** | 53.8 ms | **21×**（不公平） |
+
+---
+
+# 拆 1.12 s
+
+> 日期：2026-09-03。同一台 4 核 Xeon。
+> 命令：`cargo run --release -p e5-embed --bin breakdown`
+> 全文：`notes/gap-breakdown.md`。
+
+`embed_passages` 1099 ms = sentencepiece **457 ms** + `forward_raw` **639 ms**。
+Rust ort 53.8 ms 只有 `session.run`。公平模型倍数是 **12×**，不是 21×。
+639 ms 被隔离块加总对上（差 1%）：MMI 228（36%）+ flash 205（32%）+ 展开 GELU 117（18%）+ LN 44 + DQL 33。
+
+下一刀打模型内这三块（整层融合 / int8 flash / GEMM），不要再当「生成图税」或再调 flash TILE。`compare_ort` 的 512 行已拆 tokenize / `forward_raw`。

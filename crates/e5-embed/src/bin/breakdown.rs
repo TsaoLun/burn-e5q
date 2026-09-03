@@ -73,12 +73,26 @@ fn main() -> anyhow::Result<()> {
     println!("\n=== Calibration: real E5Embedder forward ===");
     let embedder = E5Embedder::load(&default_model_dir(), &device)?;
 
+    // Same synthetic 512-token passage as gen_ref.py / mem_stress / compare_ort.
     let long: String = "Night ride along the riverside with friends. 周末滨江夜骑。 ".repeat(55);
     let long_ids = embedder.encode_prefixed("passage: ", &long)?;
     let long_toks = long_ids.len().min(512);
     let short = "周末滨江夜骑 V11，速度很快！";
     let short_ids = embedder.encode_prefixed("passage: ", short)?;
     let short_toks = short_ids.len().min(512);
+    println!(
+        "  long text: {} chars → {} ids (compare_ort / mem_stress string)",
+        long.chars().count(),
+        long_ids.len()
+    );
+
+    let unique_512 = time_assembled_unique(&device, &s512, 3);
+    print_row(
+        "assembled 12 layers unique W",
+        unique_512,
+        LAYERS,
+        None,
+    );
 
     let full_512 = time_min_ms(3, || {
         let _ = black_box(embedder.embed_passages(&[&long]).expect("512 embed"));
@@ -87,49 +101,97 @@ fn main() -> anyhow::Result<()> {
         let _ = black_box(embedder.embed_passages(&[short]).expect("16 embed"));
     });
 
+    let (ids, mask, ttype) = pad_row(&long_ids, 512, 1);
+    let ids_t = Tensor::<2, Int>::from_data(TensorData::new(ids, [1, 512]), &device);
+    let mask_t = Tensor::<2, Int>::from_data(TensorData::new(mask, [1, 512]), &device);
+    let tt_t = Tensor::<2, Int>::from_data(TensorData::new(ttype, [1, 512]), &device);
+
+    let tok_ms = time_min_ms(5, || {
+        let _ = black_box(embedder.encode_prefixed("passage: ", &long).expect("tok"));
+    });
+    let raw_ms = time_min_ms(3, || {
+        let h = embedder.forward_raw(ids_t.clone(), mask_t.clone(), tt_t.clone());
+        black_box(h);
+    });
+    let raw_read_ms = time_min_ms(3, || {
+        let h = embedder.forward_raw(ids_t.clone(), mask_t.clone(), tt_t.clone());
+        let _ = black_box(h.into_data());
+    });
+
     println!(
-        "  real 512-tok embed_passages ({long_toks} tok, min of 3): {full_512:7.1} ms"
+        "  embed_passages 512 (tokenize+model, {long_toks} tok): {full_512:7.1} ms"
     );
     println!(
-        "  real 16-tok  embed_passages ({short_toks} tok, min of 5): {full_16:7.1} ms"
+        "  embed_passages 16  (tokenize+model, {short_toks} tok): {full_16:7.1} ms"
+    );
+    println!("  tokenize long text only (sentencepiece):             {tok_ms:7.1} ms");
+    println!("  forward_raw 512 (model only, no pool):               {raw_ms:7.1} ms");
+    println!("  forward_raw 512 + into_data hidden:                  {raw_read_ms:7.1} ms");
+    println!(
+        "  assembled 12 layers, unique weights/layer:            {:7.1} ms",
+        unique_512.0
     );
     println!(
-        "  512 unaccounted (real − isolated sum):  {:>7.1} ms ({:.0}%)",
-        full_512 - r512.accounted(),
-        100.0 * (full_512 - r512.accounted()) / full_512.max(1e-9)
+        "  model gap (forward_raw − isolated sum): {:>7.1} ms ({:.0}%)",
+        raw_ms - r512.accounted(),
+        100.0 * (raw_ms - r512.accounted()) / raw_ms.max(1e-9)
     );
     println!(
-        "  512 unaccounted (real − assembled):     {:>7.1} ms ({:.0}%)",
-        full_512 - r512.assembled_ms,
-        100.0 * (full_512 - r512.assembled_ms) / full_512.max(1e-9)
+        "  embed_passages − (tokenize + forward_raw): {:>7.1} ms",
+        full_512 - (tok_ms + raw_ms)
     );
     println!(
-        "  16  unaccounted (real − isolated sum):  {:>7.1} ms ({:.0}%)",
+        "  16 model gap (embed − isolated; tokenize≈0): {:>7.1} ms ({:.0}%)",
         full_16 - r16.accounted(),
         100.0 * (full_16 - r16.accounted()) / full_16.max(1e-9)
     );
 
-    println!("\n=== Share of real 512 forward (isolated min / real) ===");
-    print_share("flash attention ×12", r512.flash_ms, full_512);
-    print_share("MMI QKV+out ×36", r512.mmi_qkv_ms, full_512);
-    print_share("MMI FFN1 ×12", r512.mmi_ffn1_ms, full_512);
-    print_share("MMI FFN2 ×12", r512.mmi_ffn2_ms, full_512);
-    print_share("MMI all 72", r512.mmi_all(), full_512);
-    print_share("DQL ×48", r512.dql_ms, full_512);
-    print_share("expanded LN ×25", r512.ln_ms, full_512);
-    print_share("expanded GELU ×12", r512.gelu_ms, full_512);
-    print_share("MMI dequant ×72", r512.dequant_ms, full_512);
-    print_share("QKV reshape/permute ×12", r512.glue_ms, full_512);
-    print_share("embedding take+dequant", r512.embed_ms, full_512);
-    print_share("isolated sum", r512.accounted(), full_512);
-    print_share("assembled 12 layers", r512.assembled_ms, full_512);
-    print_share("Rust ort 512 (54 ms)", 53.8, full_512);
+    println!("\n=== sentencepiece encode vs char count (same long string prefixes) ===");
+    for n_chars in [64, 200, 400, 800, 1600, 2915] {
+        let prefix = prefix_chars(&long, n_chars);
+        let ms = time_min_ms(5, || {
+            let _ = black_box(embedder.encode_prefixed("passage: ", prefix).expect("tok"));
+        });
+        let n_ids = embedder.encode_prefixed("passage: ", prefix)?.len();
+        println!(
+            "  {:>5} chars → {:>4} ids   {ms:7.1} ms",
+            prefix.chars().count(),
+            n_ids
+        );
+    }
+
+    println!("\n=== Fair vs published (model only vs embed_passages) ===");
+    println!(
+        "  unfair 512: embed_passages {full_512:.1} / Rust ort session 53.8 = {:.1}×",
+        full_512 / 53.8
+    );
+    println!(
+        "  fair 512:   forward_raw    {raw_ms:.1} / Rust ort session 53.8 = {:.1}×",
+        raw_ms / 53.8
+    );
+
+    println!("\n=== Share of MODEL 512 (isolated min / forward_raw) ===");
+    print_share("flash attention ×12", r512.flash_ms, raw_ms);
+    print_share("MMI QKV+out ×36", r512.mmi_qkv_ms, raw_ms);
+    print_share("MMI FFN1 ×12", r512.mmi_ffn1_ms, raw_ms);
+    print_share("MMI FFN2 ×12", r512.mmi_ffn2_ms, raw_ms);
+    print_share("MMI all 72", r512.mmi_all(), raw_ms);
+    print_share("DQL ×48", r512.dql_ms, raw_ms);
+    print_share("expanded LN ×25", r512.ln_ms, raw_ms);
+    print_share("expanded GELU ×12", r512.gelu_ms, raw_ms);
+    print_share("MMI dequant ×72", r512.dequant_ms, raw_ms);
+    print_share("QKV reshape/permute ×12", r512.glue_ms, raw_ms);
+    print_share("embedding take+dequant", r512.embed_ms, raw_ms);
+    print_share("isolated sum", r512.accounted(), raw_ms);
+    print_share("assembled 12 layers", r512.assembled_ms, raw_ms);
+    print_share("assembled unique W", unique_512.0, raw_ms);
+    print_share("Rust ort 512 (54 ms)", 53.8, raw_ms);
+    print_share("tokenize long text", tok_ms, full_512);
 
     println!("\nHow to read:");
-    println!("  MMI dominates            → next cut is FFN/QKV schedule or fused layer, not flash");
-    println!("  LN+GELU+glue large       → codegen layer_norm/gelu or a whole-layer exec unit");
-    println!("  isolated ≪ real          → leftover is generated-graph tax (val/shape/clone)");
-    println!("  isolated ≈ real, MMI big → ORT wins on fusion, not a single slow kernel");
+    println!("  compare_ort / mem_stress 512 includes sentencepiece; Rust ort 54 ms is session.run only");
+    println!("  MMI + flash + GELU should sum to ~forward_raw if the model is explained");
+    println!("  GELU/erf large → fuse gelu; flash large → int8 flash (route C); MMI large → layer GEMM");
     Ok(())
 }
 
@@ -679,4 +741,32 @@ fn time_assembled(device: &Device, shapes: &Shapes, repeats: usize) -> (f64, f64
         }
         black_box(x);
     })
+}
+
+fn time_assembled_unique(device: &Device, shapes: &Shapes, repeats: usize) -> (f64, f64) {
+    let ws: Vec<LayerWeights> = (0..LAYERS).map(|_| layer_weights(device, shapes.seq)).collect();
+    let x0 = f32_tensor(shapes.hidden, -1.0, 1.0, device);
+    time_pair(repeats, || {
+        let mut x = x0.clone();
+        for w in &ws {
+            x = one_layer(x, w, shapes.seq);
+        }
+        black_box(x);
+    })
+}
+
+fn prefix_chars(s: &str, n: usize) -> &str {
+    match s.char_indices().nth(n) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
+fn pad_row(ids: &[i64], seq: usize, pad: i64) -> (Vec<i64>, Vec<i64>, Vec<i64>) {
+    let mut input = vec![pad; seq];
+    let mut mask = vec![0i64; seq];
+    let n = ids.len().min(seq);
+    input[..n].copy_from_slice(&ids[..n]);
+    mask[..n].fill(1);
+    (input, mask, vec![0i64; seq])
 }

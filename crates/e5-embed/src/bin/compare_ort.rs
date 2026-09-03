@@ -320,6 +320,40 @@ fn main() -> anyhow::Result<()> {
         long_toks,
     );
 
+    // embed_passages includes sentencepiece. The Rust ort 54 ms baseline is
+    // session.run on pre-encoded ids — split so we stop comparing those.
+    let mut tok_long = f64::INFINITY;
+    for _ in 0..3 {
+        let t = Instant::now();
+        let _ = embedder.encode_prefixed(E5_PASSAGE_PREFIX, long_text)?;
+        tok_long = tok_long.min(t.elapsed().as_secs_f64() * 1e3);
+    }
+    let long_ids = embedder.encode_prefixed(E5_PASSAGE_PREFIX, long_text)?;
+    let seq = long_ids.len().min(512);
+    let mut input = vec![1i64; seq];
+    let mut mask = vec![0i64; seq];
+    input[..seq].copy_from_slice(&long_ids[..seq]);
+    mask.fill(1);
+    use burn::prelude::*;
+    let ids_t = Tensor::<2, Int>::from_data(TensorData::new(input, [1, seq]), &device);
+    let mask_t = Tensor::<2, Int>::from_data(TensorData::new(mask, [1, seq]), &device);
+    let tt_t = Tensor::<2, Int>::zeros([1, seq], &device);
+    let mut fwd_long = f64::INFINITY;
+    for _ in 0..3 {
+        let t = Instant::now();
+        let h = embedder.forward_raw(ids_t.clone(), mask_t.clone(), tt_t.clone());
+        let _ = std::hint::black_box(h);
+        fwd_long = fwd_long.min(t.elapsed().as_secs_f64() * 1e3);
+    }
+    println!(
+        "  long split: tokenize {tok_long:.1} ms + forward_raw {fwd_long:.1} ms (embed_passages {burn_long:.1})"
+    );
+    println!(
+        "  long vs Rust ort session 53.8 ms: model {:.1}× | embed_passages {:.1}×",
+        fwd_long / 53.8,
+        burn_long / 53.8
+    );
+
     println!("\n=== Throughput ===");
     println!(
         "  short : {:>7.2} q/s   {:>8.0} tok/s   ({} tok)",
