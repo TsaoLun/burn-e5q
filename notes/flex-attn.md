@@ -41,11 +41,34 @@ PV: MMI → Cast → Mul → permute → reshape [B,S,384]
 没有新 kernel，没有 `unsafe`。数值会相对 ORT 的 int8 QK/PV 路径漂移，
 预期仍在 0.99x；若崩再改 streaming int8。
 
-## 验收（用来证明或证伪判断）
+## 对拍（本机 4 核 Xeon，flex）
 
-- 生成代码出现 `burn::tensor::module::attention`，12 个 Softmax 消失。
-- 正确性：mean cos 仍约 0.99x；top-1 检索不崩。
-- 性能：512 从 1.27 s 掉到 **约 300–500 ms** 才算分水岭（相对 54 ms ORT
-  进个位数倍）。若几乎没动，说明瓶颈不在 `[S,S]`，判断被证伪。
-- 内存：4×512 HWM 相对 315 MB 应明显下降。
-- 短句 16 tok 可能几乎不动（调度税 + naive 小路），与先前判断一致。
+生成代码：**12** 次 `burn::tensor::module::attention`，**0** 个 Softmax，
+DQL 96→48，MatMulInteger 96→72。scale 是 `1/√32`，mask 是图级
+`[B,1,1,S]` 加法 bias，K 有 corrective `permute([0,1,3,2])`。
+
+| 场景 | 融 DQL | **融合 attn** | vs 融 DQL | **vs 本机 Rust ort** |
+|---|---:|---:|---:|---:|
+| 16 tok | 29.6 ms | **29.5 ms** | 1.00× | **12×**（2.4 ms） |
+| packed batch | 7.07 s | **5.57 s** | 1.27× | **5.9×**（936 ms） |
+| 512 tok | 1.27 s | **1.15 s** | 1.10× | **21×**（53.8 ms） |
+
+mean cos **0.9946**（min 0.9861，融 DQL 是 0.9960 / 0.9935）。
+top-3 检索从 0/2 变成 **2/2**。加载 RSS 87.5 MB；`mem_stress -- 5 2048`
+稳态 **213 / 278 MB**（HWM 相对融 DQL 的 315 降 37 MB）。
+
+## 判断被证伪（延迟）
+
+预设分水岭是 512 掉到 300–500 ms。实际只掉 **10%**。图已经不再物化
+`[12,S,S]`（HWM 也降了），所以剩下的 ~1.15 s **不是** softmax / score
+矩阵。更大的账在：
+
+1. 每层还剩 6 个 int8 GEMM（QKV + out + FFN），72 个 MMI 仍走逐 op 调度。
+2. 把 int8 QK/PV（VNNI）换成 f32 flash，等于丢掉一条已经很快的整数路径，
+   换来的 tiled f32 gemm 并不便宜。
+3. LayerNorm / 其余 eager 调度税没动。
+
+短句完全不动，与「16 tok 走 naive、调度主导」一致。
+
+要再追 ORT，下一刀不该是再融一个 DQL，而是 **整层当执行单元**
+（QKV+attn+FFN），或给 flash 一条不慢于 VNNI QK 的实现。

@@ -301,9 +301,46 @@ Rust ort（rc.13 自带的 ORT）对 `ref_data.json` 里 Python 1.29 向量的 m
 
 > 日期：2026-09-03。同一台 4 核 Xeon（`avx512_vnni`）。
 > 栈：`vendor/burn-onnx-coalesce-int8-attn` `f78e156` + `vendor/burn-flash-512` `245ab35`。
-> 实现：`notes/flex-attn.md`。
-> 对拍尚未跑完；数字补在测后。
+> 命令：`cargo run --release -p e5-embed --bin compare_ort`；`mem_stress -- 5 2048`。
+> 基线：上一节本机 Rust ort arena off（2.4 / 936 / 53.8 ms）。实现：`notes/flex-attn.md`。
 
 ## TL;DR
 
-把 e5 每层的 int8 SDPA（DQL + MatMulInteger QK/PV + Softmax）收成 Burn `attention()`，512×512 走 flex flash，不再物化 `[12,S,S]`。这是「追上 ORT」图景里提升最大的一步；用来证明或证伪「瓶颈在 `[H,S,S]`」的判断。
+图改对了：12 层都收成 `attention()`，Softmax 清零，DQL 96→48，MMI 96→72，512 走 flex flash。
+**延迟判断被证伪。** 512 只从 1.27 s 掉到 **1.15 s**（10%），没进 300–500 ms 分水岭。
+`[H,S,S]` 不再物化（4×512 HWM 315→278），所以剩下的 ~21× 不是 score 矩阵。
+
+| 维度 | 结果 | 判定 |
+|---|---|---|
+| 图 | 12× `module::attention`，0 Softmax，scale=`1/√32` | ✅ |
+| 数值 | min cos 0.9861，mean **0.9946** | ⚠️ 比融 DQL 的 0.9960 略漂 |
+| 检索 | top-3 **2/2**（融 DQL 是 0/2） | ✅ 排序反而齐了 |
+| 短文本 | **29.5 ms**（29.6 → 1.00×） | 调度主导，符合预期 |
+| packed batch | **5.57 s**（7.07 → 1.27×） | 小 |
+| 512 tok | **1154 ms**（1272 → 1.10×） | ❌ 未达分水岭 |
+| vs 本机 Rust ort | 短 **12×**，batch **5.9×**，512 **21×**（53.8 ms） | 未达 ~2× |
+| 内存 | 4×512 稳态 **213 / 278**（融 DQL 213 / 315） | ✅ HWM −37 MB |
+
+## 延迟
+
+| 场景 | 朴素 flex | VNNI+zp | 融 DQL | **融合 attn** | **Rust ort** | 倍数 |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 tok | 130 ms | 33.2 ms | 29.6 ms | **29.5 ms** | **2.4 ms** | **12×** |
+| packed batch | 26.2 s | 8.73 s | 7.07 s | **5.57 s** | **936 ms** | **5.9×** |
+| 512 tok | 3.82 s | 1.46 s | 1.27 s | **1.15 s** | **53.8 ms** | **21×** |
+
+吞吐：短 **33.9 q/s / 542 tok/s**；512 **0.87 q/s / 444 tok/s**。
+
+## 内存
+
+| 阶段 | 融 DQL | **融合 attn** | Rust ort arena off |
+|---|---:|---:|---:|
+| 加载后 RSS / HWM | 87.6 / 97.4 | **87.5 / 97.3** | 153 / 235 |
+| 4×512 稳态 / HWM | 213 / 315 | **213 / 278** | 162 / 268 |
+| compare 全流程 RSS / HWM | 236 / 401 | **238 / 336** | 193 / 346 |
+
+4×512 时延：burn ~4.9 s（融 DQL ~5.8 s）。
+
+## 还剩什么
+
+`[H,S,S]` 不是剩下那 20×。下一刀是整层执行单元（QKV+attn+FFN），或让 flash 不慢于已经在跑的 VNNI QK。再融单个 DQL / Softmax 只会再啃约 10%。
