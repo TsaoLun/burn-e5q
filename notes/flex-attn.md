@@ -1,5 +1,6 @@
 # 融合 int8 SDPA → Burn f32 attention
 
+> 怎么做、按什么顺序：`notes/flex-attn-plan.md`。
 > 2026-09-03。要证明的判断：VNNI + 融 DQL 之后，512 tok 仍剩 ~1.2 s
 > **既不是 GEMM 也不是 DQL**；ORT 赢在「一整块 Transformer 当执行单元 +
 > 不物化 `[heads,S,S]`」。对拍数字见 `notes/poc-results.md`「融合 attention」。
