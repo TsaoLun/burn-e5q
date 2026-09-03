@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-int8-attn` | `f78e156bd46dde41f822c77f3209290157c5a9b4` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-flash-512` | `245ab354c8109e74f7c2d80008130532dc3fe708` |
+| `burn`, `burn-store` | this repo `vendor/burn-flash-par-heads` | `fd4f793165d7741ee028fa7a2f542dd252181b2e` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -56,8 +56,9 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 5. **fused DQL** — `Tensor::dynamic_quantize_linear`; flex two-pass minmax+quantize
    (`vendor/burn-route-int8-matmul` `2d1084f` + codegen `7cc2d36`).
 6. **fused int8 attention** — coalesce e5's DQL+MatMulInteger SDPA onto Burn
-   `attention()`; flex sends 512×512 through flash (`vendor/burn-onnx-coalesce-int8-attn`
-   `f78e156` + `vendor/burn-flash-512` `245ab35`).
+   `attention()`; flex sends 512×512 through flash and parallelizes heads
+   (`vendor/burn-onnx-coalesce-int8-attn` `f78e156` +
+   `vendor/burn-flash-par-heads` `fd4f793`).
 7. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
