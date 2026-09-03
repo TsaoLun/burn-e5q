@@ -61,7 +61,10 @@ fn try_match_ln(
                 return None;
             }
             let (var, c) = split_tensor_and_const(add, nodes, producer)?;
-            if !(1e-12..=1e-3).contains(&c) {
+            // e5 uses 1e-12. That value is not an f32, so the stored f32
+            // (≈ 9.999e-13) must still be accepted — a closed `[1e-12, …]`
+            // range rejects it after `scalar_f64`.
+            if !(1e-13..=1e-2).contains(&c) {
                 return None;
             }
             (var, c)
@@ -507,6 +510,28 @@ mod tests {
         assert!(!result
             .iter()
             .any(|n| n.node_type == NodeType::LayerNormalization));
+    }
+
+    #[test]
+    fn f32_1e12_eps_still_matches() {
+        // BERT/e5 stores epsilon as f32 1e-12 ≈ 9.999e-13.
+        let mut nodes = e5_ln();
+        nodes[4] = op(
+            "add_eps",
+            NodeType::Add,
+            vec![tensor3("var"), const_f32("eps", 1e-12)],
+            "var_eps",
+        );
+        let ln = coalesce_layer_norm(nodes)
+            .into_iter()
+            .find(|n| n.node_type == NodeType::LayerNormalization)
+            .expect("ln");
+        match ln.attrs.get("epsilon") {
+            Some(AttributeValue::Float32(e)) => {
+                assert!((*e as f64 - 1e-12).abs() < 1e-18 || (*e as f64) < 1e-11)
+            }
+            other => panic!("bad epsilon {other:?}"),
+        }
     }
 
     #[test]
