@@ -401,3 +401,14 @@ flex 大 GELU 走 rayon（仍是 `libm::erff`）。
 | 512 `forward_raw` | 639 ms | **636 ms** | 53.8 ms | **11.8×** |
 
 下一刀：路线 C 整数 flash（模型 32%）和 MMI 再快（36%）。不要再调 TILE / 再融单个 DQL。
+
+---
+
+# 整数 flash + AMX
+
+> 日期：2026-09-03。同一台 4 核 Xeon（`avx512_vnni` + `amx_int8`）。
+> 栈：`vendor/burn-int8-flash-amx` `5abc55e`（叠在融 GELU/LN 上）。
+> 实现：`notes/flex-int8-flash-amx.md`。
+
+flex `attention()` 在 seq≥256 时走 VNNI QK；对齐的 u8×i8 MMI 走 AMX `tdpbusd`。
+对拍数字待 `compare_ort` / `breakdown` 写入。读数用 `forward_raw`。
