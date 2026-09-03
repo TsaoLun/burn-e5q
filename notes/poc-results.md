@@ -344,3 +344,23 @@ Rust ort（rc.13 自带的 ORT）对 `ref_data.json` 里 Python 1.29 向量的 m
 ## 还剩什么
 
 `[H,S,S]` 不是剩下那 20×。下一刀是整层执行单元（QKV+attn+FFN），或让 flash 不慢于已经在跑的 VNNI QK。再融单个 DQL / Softmax 只会再啃约 10%。
+
+---
+
+# flash 按 head 并行
+
+> 日期：2026-09-03。同一台 4 核 Xeon。
+> 栈：`vendor/burn-flash-par-heads` `fd4f793`（叠在融合 attn 上）。
+> 实现：`notes/flex-flash-par.md`。
+
+## TL;DR
+
+flash 的 12 个 head 改成 rayon 并行。数值与串行 flash 完全一致。
+**512 1.15 s → 1.12 s（3%）**，4×512 HWM 仍是 278 MB。
+剩下的时间不在 flash。不要再调 TILE / gemm 并行。
+
+| 场景 | 融合 attn | **head 并行** | Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok | 29.5 ms | **28.4 ms** | 2.4 ms | **12×** |
+| packed batch | 5.57 s | **5.44 s** | 936 ms | **5.8×** |
+| 512 tok | 1.15 s | **1.12 s** | 53.8 ms | **21×** |
