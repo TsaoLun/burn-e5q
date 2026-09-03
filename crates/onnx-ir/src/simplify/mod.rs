@@ -6,6 +6,8 @@
 //! ## Current passes (in execution order per iteration)
 //!
 //! 1. **Attention coalescing** - decomposed SDPA pattern -> single Attention node
+//! 1b. **GELU / LayerNorm coalescing** - expanded erf-GELU and last-axis LN
+//!     subgraphs -> `Gelu` / `LayerNormalization` so flex can use fused kernels
 //! 2. **Permute-reshape detection** - Shape+Gather+Unsqueeze+Concat+Reshape -> Transpose
 //! 3. **Constant shape propagation** - Shape->Gather and Shape->Slice elimination,
 //!    and Size of a Shape-typed value
@@ -35,6 +37,8 @@
 //! involved and dynamic dims cannot invalidate it.
 
 mod coalesce_attention;
+mod coalesce_gelu;
+mod coalesce_layer_norm;
 pub(crate) mod constant_fold;
 mod constant_shape;
 mod dead_nodes;
@@ -51,6 +55,8 @@ use crate::{
 };
 
 use coalesce_attention::coalesce_attention;
+use coalesce_gelu::coalesce_gelu;
+use coalesce_layer_norm::coalesce_layer_norm;
 use constant_fold::fold_constants;
 use constant_shape::simplify_constant_shape;
 use dead_nodes::eliminate_dead_nodes;
@@ -79,6 +85,12 @@ pub(crate) fn simplify_graph(
         // Attention coalescing (must run before permute-reshape, since attention
         // pattern uses native Transpose nodes, not Reshape-based transposes)
         nodes = coalesce_attention(nodes);
+
+        // Expanded GELU (`x*0.5*(1+erf(x/√2))`) and last-axis LayerNorm.
+        // Must run on the still-expanded subgraph, before constant folding
+        // rewrites the scalar Unsqueeze/Pow nodes the matchers walk.
+        nodes = coalesce_gelu(nodes);
+        nodes = coalesce_layer_norm(nodes);
 
         // Structural pattern detection (must run before constant folding, which
         // replaces Gather/Slice nodes with Constants and destroys the patterns)
