@@ -192,7 +192,7 @@ fn main() -> anyhow::Result<()> {
     println!("\nHow to read:");
     println!("  compare_ort / mem_stress 512 includes sentencepiece; Rust ort 54 ms is session.run only");
     println!("  MMI + flash + GELU should sum to ~forward_raw if the model is explained");
-    println!("  GELU/erf large → fuse gelu; flash large → int8 flash (route C); MMI large → layer GEMM");
+    println!("  flash 走 VNNI QK（seq≥256）；对齐 MMI 走 AMX；读数看 fused 行和 forward_raw");
     Ok(())
 }
 
