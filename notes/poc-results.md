@@ -891,5 +891,84 @@ mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1
 
 `Cast(i32→f32) → Mul(scale) → Add(bias) [→ Gelu]` 收成一趟 AVX-512。
 不融 residual。不为 DQL 重算两遍 GELU。
+生成图：`dequant_affine_gelu` ×12 + `dequant_affine` ×60，FFN1 不再走 `activation::gelu`。
 
-对拍数字待本轮 `compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 补。
+mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1 仍中）。
+
+| 场景 | AVX-512 LN | **FFN fuse** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 2.5 | **2.5** | **2.4** | **1.0×** |
+| packed batch `embed_passages` | 1366 | **1398** | **923** | **1.5×** |
+| 512 `forward_raw` | 103.8 | **106.1** | **39.3** | **2.7×** |
+| 512 `embed_passages` | 591 | **593** | 39.3 | 含 ~471 ms SP |
+| 4×512 `mem_stress` | 2444 | **2286** | **334** | **6.8×** |
+
+`compare_ort` 512 **106.1**；breakdown 校准 **104.7**。相对 LN 刀没有端到端加速。
+本轮 ort 512 从 52.4 掉到 **39.3**（两轮 39.3 / 39.7），倍数从 2.0× 变成 2.7×
+是分母变了，不是 burn 变慢。
+
+`mem_stress` RSS **234 / 257 MB**。
+
+---
+
+# 本机再对 Rust ort（FFN fuse 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-fuse-ffn` `5437737` + `vendor/burn-onnx-fuse-ffn` `1b776e9`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 ids。两轮：512 **39.3 / 39.7**，4×512 中位 **334**。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **2.5 ms** | **2.4 ms** | **1.0×** | 只有模型 |
+| 16 tok `embed_passages` | 6.2 ms | 2.4 ms | 2.6× | burn 含 3.4 ms SP |
+| packed batch | 1398 ms | **923 ms** | 1.5× | burn 含 SP |
+| 512 `forward_raw` | **106.1 ms** | **39.3 ms** | **2.7×** | 只有模型 |
+| 512 `embed_passages` | 593 ms | 39.3 ms | 15.1× | burn 含 ~471 ms SP |
+| 4×512 `mem_stress` | 2286 ms | **334 ms** | **6.8×** | burn 含 SP；ort dummy ids |
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **400** | **6400** | **417** | **6667** |
+| packed batch | 5.7 | 428 | 7.6 | 642 |
+| 512 模型 | **9.4** | **4826** | **25.4** | **13026** |
+| 4×512 | 1.7 | 896 | 12.0 | 6138 |
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9952** | **0.9968** |
+| min cos | 0.9903 | 0.9956 |
+| ranking top-3 | 1/2 | — |
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn FFN fuse | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.2 / 3.3 | 7.3 / 7.3 |
+| 模型加载后 | **87.6 / 97.3** | 154 / 235 |
+| 4×512 稳态 / HWM | **234 / 257** | **194 / 347** |
+| compare 全流程 | 246 / 288 | 194 / 347 |
+
+两边都进 512 MB。
+
+## 512 模型里还剩什么（breakdown / ~105 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **41** | **~39%** |
+| MMI 72（隔离；整网缓存更轻） | 17–47 | ~25–45% |
+| fused GELU ×12（隔离，未走融合 dequant） | 19 | ~18% |
+| MMI dequant ×72（隔离 split） | 6.4 | ~6% |
+| fused LN ×25 | **1.4** | ~1% |
+| DQL ×48 | 4.8 | ~5% |
+
+生成图已经没有单独的 FFN1 `gelu()`。隔离行仍是拆开测的，所以 GELU+dequant
+加起来会双计。端到端 512 相对 LN 刀持平（104–106）。
+
+下一刀再砍 flash，或让 FFN1 MMI 打中 packed-B 缓存。
+不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。

@@ -48,7 +48,28 @@ FFN1 12 处带 GELU；FFN2 / QKV / out 约 60 处只有 Cast→Mul→Add。
 
 ## 对拍（本机 4 核 Xeon，flex release；进程分开跑）
 
-待 `compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 跑完后补。
+`compare_ort` 主表仍印 Mac Python 4.3 / 1412 / 201。分母用本轮单独
+`ort-mem`（arena off，两轮稳定）：短 **2.4** / packed **923** / 512 **39.3**。
+上一刀 ort 512 是 52.4；本轮 ort 自己快了一截，倍数不能跟 2.0× 直接比。
 
-合理预期 512 `forward_raw` 再掉 **10–20 ms**（104 → ~85–95）。
-不要指望到 1×。flash 仍是最大头。
+生成图验收：`dequant_affine_gelu` ×12、`dequant_affine` ×60、`activation::gelu` ×0。
+
+| 口径 | AVX-512 LN | **这一刀** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 2.5 | **2.5** | 2.4 | **1.0×** |
+| packed batch `embed_passages` | 1366 | **1398** | 923 | **1.5×**（burn 含 SP） |
+| 512 `forward_raw` | 103.8 | **106.1** | 39.3 | **2.7×** |
+| 4×512 `mem_stress` | 2444 | **2286** | 334 | **6.8×**（burn 含 SP） |
+
+mean cos **0.9952**（min **0.9903**）。ranking 1/2（第二条 top-1 仍中，2/3 互换）。
+`compare_ort` 512 **106.1**；breakdown 校准 **104.7**。相对 LN 刀 103.8，端到端没有掉那
+预期的 10–20 ms：GELU 和 dequant 本来就各是一趟 AVX-512，合成之后省下的那次
+walk 被 flash（41）和 MMI（47）盖住了。
+
+`mem_stress -- 5 2048`：五轮 2276–2390，中位 **2286**。RSS **234 / 257 MB**。
+Rust ort 同预算 **194 / 347 MB**，4×512 中位 **334**。
+
+隔离（仍是拆开的 kernel，不是融合路径）：flash ×12 **41**；fused GELU ×12 **19**；
+MMI dequant ×72 **6.4**；fused LN ×25 **1.4**；DQL ×48 **4.8**。
+
+不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。下一刀再砍 flash 或 MMI。

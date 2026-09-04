@@ -382,9 +382,9 @@ fn main() -> anyhow::Result<()> {
     // Live `cargo run --release -p ort-mem` on this 4-core Xeon (2026-09-04):
     // arena off, pre-encoded ids, session.run + mean-pool. Not the Mac
     // Python numbers in ref_data.json (4.3 / 1412 / 201).
-    const RUST_ORT_SHORT_MS: f64 = 3.5;
-    const RUST_ORT_PACKED_MS: f64 = 1099.4;
-    const RUST_ORT_512_MS: f64 = 53.8;
+    const RUST_ORT_SHORT_MS: f64 = 2.4;
+    const RUST_ORT_PACKED_MS: f64 = 923.4;
+    const RUST_ORT_512_MS: f64 = 39.3;
     println!("\n=== vs this-machine Rust ort (ort-mem, arena off) ===");
     println!(
         "  short model:   forward_raw {fwd_short:.1} / {RUST_ORT_SHORT_MS:.1} = {:.1}×  (embed_passages {burn_single:.1} = {:.1}×, includes SP)",
