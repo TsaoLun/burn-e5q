@@ -285,6 +285,23 @@ fn one_head(
     );
 }
 
+/// Per-thread: flush denormals. Padded e5 rows (6 shorts in a `[7,512]` pack)
+/// otherwise spend tens of seconds in denormal AVX-512 QK/PV.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+fn enable_ftz_daz() {
+    unsafe {
+        let mut mxcsr: u32 = 0;
+        core::arch::asm!(
+            "stmxcsr [{ptr}]",
+            "or dword ptr [{ptr}], {flags}",
+            "ldmxcsr [{ptr}]",
+            ptr = in(reg) &mut mxcsr,
+            flags = const (1u32 << 15) | (1u32 << 6),
+            options(nostack),
+        );
+    }
+}
+
 fn flash_head_d32(
     q: &[f32],
     k: &[f32],
@@ -294,6 +311,9 @@ fn flash_head_d32(
     bias: Option<&[f32]>,
     p: &HeadParams,
 ) {
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    enable_ftz_daz();
+
     let seq_q = p.seq_q;
     let seq_kv = p.seq_kv;
     let scale = p.scale;

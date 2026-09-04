@@ -650,6 +650,20 @@ fn flash_attention_head<T: FlashGemm>(
     mask_q_step: usize,
     bias_q_step: usize,
 ) {
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    unsafe {
+        // Same denormal trap as attention_d32: padded rows otherwise crawl.
+        let mut mxcsr: u32 = 0;
+        core::arch::asm!(
+            "stmxcsr [{ptr}]",
+            "or dword ptr [{ptr}], {flags}",
+            "ldmxcsr [{ptr}]",
+            ptr = in(reg) &mut mxcsr,
+            flags = const (1u32 << 15) | (1u32 << 6),
+            options(nostack),
+        );
+    }
+
     debug_assert_eq!(q.len(), p.seq_q * p.head_dim);
     debug_assert_eq!(k.len(), p.seq_kv * p.head_dim);
     debug_assert_eq!(v.len(), p.seq_kv * p.val_dim);
