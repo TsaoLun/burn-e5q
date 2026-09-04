@@ -45,6 +45,6 @@ mean cos **0.9950**（min **0.9876**），ranking 2/2。
 隔离 fused GELU ×12：**83 → 17 ms**。`forward_raw` **350 → 269**（−81 ms）。
 `mem_stress -- 5 2048`：4×512 **3050 ms**，RSS **213 / 232 MB**。
 
-512 还差 ~161 ms 才到 2×（~108 ms）。大头变成 D=32 flash（隔离 132 / ~50%）
-和整层 FFN 融合（MMI + GELU + DQL + LN 少扫几趟 `[1,512,1536]`）。
+512 还差 ~161 ms 才到 2×（~108 ms）。下一刀 AVX-512 DQL + QK bias
+已做（`notes/flex-simd-dql.md`，512 → 185 ms / 3.3×）。
 不要再调 TILE / 再挂钩 C-lite / 再用 A&S 换默认 erf。

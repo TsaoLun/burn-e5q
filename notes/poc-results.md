@@ -518,5 +518,102 @@ mean cos **0.9950**（min 0.9876），ranking 2/2。
 隔离 fused GELU ×12：**83 → 17 ms**。`forward_raw` **350 → 269**（−81 ms）。
 `mem_stress -- 5 2048`：4×512 **3050 ms**，RSS **213 / 232 MB**。
 
-到 2× 还差 ~161 ms。下一刀是整层 FFN 融合或再砍 flash，不是再调 TILE /
-再挂钩 C-lite / 再用 A&S 换默认 erf。
+到 2× 还差 ~161 ms。下一刀 AVX-512 DQL 已做（见下节）。
+
+---
+
+# AVX-512 DQL + flash bias 融进 QK
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-simd-dql` `2b47a1b`（叠在 SIMD GELU 上）。
+> 实现：`notes/flex-simd-dql.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+DQL minmax / quantize 走 AVX-512，公式仍是 `v / scale` + ties-to-even
+（不能改成 `v * (1/scale)`，不能开 FTZ）。`[B,1,1,S]` bias 在 QK 满 64
+宽 tile 的 epilogue 里加；worker 复用 `[S×64]` scratch。TILE 仍是 64。
+
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+
+| 场景 | SIMD GELU | **DQL + QK bias** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 10.9 | **10.1** | **3.6** | **2.8×** |
+| packed batch `embed_passages` | 2401 | **1905** | **1201** | **1.6×** |
+| 512 `forward_raw` | 269 | **185** | **55.6** | **3.3×** |
+| 512 vs 历史 53.8 | 269 | **185** | 53.8 | **3.4×** |
+| 512 `embed_passages` | 731 | **718** | 55.6 | 含 ~532 ms SP |
+
+隔离 DQL ×48：**33 → 4.8 ms**。隔离 flash ×12：**132 → 78 ms**。
+`forward_raw` **269 → 185**（−84 ms）。compare_ort 印 184.9；breakdown 校准 177。
+`mem_stress -- 5 2048`：4×512 **~2827 ms**，RSS **213 / 232 MB**。
+
+---
+
+# 本机再对 Rust ort（SIMD DQL 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-simd-dql` `2b47a1b`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 `ref_data.json` ids。
+
+`compare_ort` 主表里的 4.3 / 1412 / 201 仍是 Mac Python ort，**不要当倍数分母**。
+下面用刚跑的 `ort-mem`。packed：burn 是 8 条 passage（含空串，598 tok，含 SP）；
+ort 是 7 条非空（593 tok，只有 session）。512 行主导两边。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **10.1 ms** | **3.6 ms** | **2.8×** | 只有模型 |
+| 16 tok `embed_passages` | 14.2 ms | 3.6 ms | 3.9× | burn 含 3.9 ms SP |
+| packed batch | 1905 ms | **1201 ms** | 1.6× | burn 含 SP；ort 只有 session |
+| 512 `forward_raw` | **185 ms** | **55.6 ms** | **3.3×** | 只有模型 |
+| 512 `embed_passages` | 718 ms | 55.6 ms | 12.9× | burn 含 ~532 ms SP |
+| 4×512 `mem_stress` | 2827 ms | **514 ms** | **5.5×** | dummy ids，无 SP |
+
+本轮 ort 512 是 55.6（历史多次 53.8）。对 2× 目标仍按 ~54 ms → **~108 ms**，还差 ~77 ms。
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **99** | **1584** | **278** | **4455** |
+| packed batch | 4.2 | 314 | 5.8 | 494 |
+| 512 模型 | **5.4** | **2770** | **18.0** | **9201** |
+| 4×512 | 1.4 | 725 | 7.8 | 3984 |
+
+packed / `embed_passages` 吞吐被 sentencepiece 拉低，不拿来当模型基线。
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9950** | **0.9968** |
+| min cos | 0.9876 | 0.9956 |
+| ranking top-3 | 2/2 | — |
+
+跨引擎仍是 int8 固有分歧，不是 DQL SIMD 算错。
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn DQL | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.1 / 3.2 | 7.2 / 7.2 |
+| 模型加载后 | **87.4 / 97.3** | 155 / 235 |
+| 4×512 稳态 / HWM | **213 / 232** | **195 / 348** |
+| compare 全流程 | 213 / 258 | 195 / 348 |
+
+两边都进 512 MB。加载和 HWM 更轻的是 burn；4×512 稳态 RSS burn 大约 +18 MB。
+
+## 512 模型里还剩什么（breakdown / ~185 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **78** | **~42%** |
+| MMI 72（隔离；整网 AMX 更轻） | 21–54 | ~15–25% |
+| fused LN ×25 | 22 | ~12% |
+| fused GELU ×12 | 17 | ~9% |
+| DQL ×48 | **4.8** | 已不是大头 |
+| dequant | 6 | ~3% |
+
+下一刀：整层 FFN 融合（少扫 `[1,512,1536]`），或再砍 flash。
+不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
