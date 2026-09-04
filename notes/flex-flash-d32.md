@@ -1,6 +1,6 @@
 # D=32 AVX-512 flash + 不再展开 `[1,1,1,S]`
 
-> 2026-09-04。改动在 `vendor/burn-flash-d32`（`a69b3a5`），叠在 AMX 上。
+> 2026-09-04。改动在 `vendor/burn-flash-d32`（`92b43c5`），叠在 AMX 上。
 > 对拍数字见 `notes/poc-results.md`「D=32 flash」。
 > 不挂钩 C-lite。不改 TILE。
 

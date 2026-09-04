@@ -468,18 +468,6 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 [[package]]
 name = "burn"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
-dependencies = [
- "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-nn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-vision 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
-]
-
-[[package]]
-name = "burn"
-version = "0.22.0-pre.3"
 source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
 dependencies = [
  "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
@@ -491,20 +479,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-autodiff"
+name = "burn"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "derive-new",
- "hashbrown 0.16.1",
- "log",
- "num-traits",
- "parking_lot",
- "portable-atomic",
- "portable-atomic-util",
- "spin 0.11.1",
+ "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-nn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-vision 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
 ]
 
 [[package]]
@@ -525,22 +508,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-backend"
+name = "burn-autodiff"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "bytemuck",
- "cubecl",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "derive-new",
- "enumset",
  "hashbrown 0.16.1",
+ "log",
  "num-traits",
- "oneshot",
+ "parking_lot",
+ "portable-atomic",
  "portable-atomic-util",
- "rand 0.10.2",
- "rand_distr",
- "serde",
  "spin 0.11.1",
 ]
 
@@ -565,13 +545,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-backend-extension"
+name = "burn-backend"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "bytemuck",
+ "cubecl",
+ "derive-new",
+ "enumset",
+ "hashbrown 0.16.1",
+ "num-traits",
+ "oneshot",
+ "portable-atomic-util",
+ "rand 0.10.2",
+ "rand_distr",
+ "serde",
+ "spin 0.11.1",
 ]
 
 [[package]]
@@ -585,30 +575,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-core"
+name = "burn-backend-extension"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "ahash",
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-backend-extension 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-derive 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-dispatch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-pack 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-tensor 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "derive-new",
- "half",
- "hashbrown 0.16.1",
- "log",
- "num-traits",
- "portable-atomic",
- "portable-atomic-util",
- "rand 0.10.2",
- "regex",
- "serde",
- "serde_json",
- "spin 0.11.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -639,13 +612,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-cpu"
+name = "burn-core"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "cubecl",
+ "ahash",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-backend-extension 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-derive 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-dispatch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-pack 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-tensor 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "derive-new",
+ "half",
+ "hashbrown 0.16.1",
+ "log",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rand 0.10.2",
+ "regex",
+ "serde",
+ "serde_json",
+ "spin 0.11.1",
 ]
 
 [[package]]
@@ -659,22 +649,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-cubecl"
+name = "burn-cpu"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "cubecl",
- "cubek",
- "derive-new",
- "futures-lite",
- "log",
- "serde",
- "text_placeholder",
 ]
 
 [[package]]
@@ -697,21 +678,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-cubecl-fusion"
+name = "burn-cubecl"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "cubecl",
  "cubek",
  "derive-new",
- "hashbrown 0.16.1",
- "rmp-serde",
+ "futures-lite",
+ "log",
  "serde",
- "spin 0.11.1",
+ "text_placeholder",
 ]
 
 [[package]]
@@ -733,13 +715,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-cuda"
+name = "burn-cubecl-fusion"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-fusion 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "cubecl",
+ "cubek",
+ "derive-new",
+ "hashbrown 0.16.1",
+ "rmp-serde",
+ "serde",
+ "spin 0.11.1",
 ]
 
 [[package]]
@@ -753,14 +743,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-derive"
+name = "burn-cuda"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "derive-new",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "cubecl",
 ]
 
 [[package]]
@@ -775,20 +764,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-dispatch"
+name = "burn-derive"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-autodiff 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cpu 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cuda 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-flex 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ndarray 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-rocm 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-tch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-wgpu 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "paste",
+ "derive-new",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -809,114 +792,110 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-flex"
+name = "burn-dispatch"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "bytemuck",
- "gemm",
- "half",
- "libm",
- "num-traits",
- "once_cell",
- "portable-atomic",
- "portable-atomic-util",
-]
-
-[[package]]
-name = "burn-flex"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
-dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "bytemuck",
- "gemm",
- "half",
- "libm",
- "num-traits",
- "once_cell",
- "portable-atomic",
- "portable-atomic-util",
-]
-
-[[package]]
-name = "burn-fusion"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
-dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "derive-new",
- "hashbrown 0.16.1",
- "log",
- "serde",
- "smallvec",
- "spin 0.11.1",
- "tracing",
-]
-
-[[package]]
-name = "burn-fusion"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
-dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "derive-new",
- "hashbrown 0.16.1",
- "log",
- "serde",
- "smallvec",
- "spin 0.11.1",
- "tracing",
-]
-
-[[package]]
-name = "burn-ir"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
-dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "hashbrown 0.16.1",
- "serde",
-]
-
-[[package]]
-name = "burn-ir"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
-dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
- "hashbrown 0.16.1",
- "serde",
-]
-
-[[package]]
-name = "burn-ndarray"
-version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
-dependencies = [
- "atomic_float",
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "const-random",
- "libm",
- "macerator",
- "matrixmultiply",
- "ndarray 0.17.2",
- "num-traits",
+ "burn-autodiff 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cpu 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cuda 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-flex 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ndarray 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-rocm 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-tch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-wgpu 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "paste",
+]
+
+[[package]]
+name = "burn-flex"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "bytemuck",
+ "gemm",
+ "half",
+ "libm",
+ "num-traits",
+ "once_cell",
  "portable-atomic",
  "portable-atomic-util",
- "rand 0.10.2",
+]
+
+[[package]]
+name = "burn-flex"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "bytemuck",
+ "gemm",
+ "half",
+ "libm",
+ "num-traits",
+ "once_cell",
+ "portable-atomic",
+ "portable-atomic-util",
+]
+
+[[package]]
+name = "burn-fusion"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "derive-new",
+ "hashbrown 0.16.1",
+ "log",
+ "serde",
+ "smallvec",
+ "spin 0.11.1",
+ "tracing",
+]
+
+[[package]]
+name = "burn-fusion"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "derive-new",
+ "hashbrown 0.16.1",
+ "log",
+ "serde",
+ "smallvec",
+ "spin 0.11.1",
+ "tracing",
+]
+
+[[package]]
+name = "burn-ir"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "hashbrown 0.16.1",
+ "serde",
+]
+
+[[package]]
+name = "burn-ir"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "hashbrown 0.16.1",
+ "serde",
 ]
 
 [[package]]
@@ -941,12 +920,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-nn"
+name = "burn-ndarray"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "atomic_float",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "const-random",
+ "libm",
+ "macerator",
+ "matrixmultiply",
+ "ndarray 0.17.2",
  "num-traits",
+ "paste",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rand 0.10.2",
 ]
 
 [[package]]
@@ -955,6 +946,15 @@ version = "0.22.0-pre.3"
 source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
 dependencies = [
  "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "num-traits",
+]
+
+[[package]]
+name = "burn-nn"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
+dependencies = [
+ "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "num-traits",
 ]
 
@@ -996,17 +996,6 @@ dependencies = [
 [[package]]
 name = "burn-pack"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
-dependencies = [
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "byteorder",
- "ciborium",
- "serde",
-]
-
-[[package]]
-name = "burn-pack"
-version = "0.22.0-pre.3"
 source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290#2d1084f760c8f948433d960d68cb667ca31b7290"
 dependencies = [
  "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
@@ -1016,13 +1005,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-rocm"
+name = "burn-pack"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "cubecl",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "byteorder",
+ "ciborium",
+ "serde",
 ]
 
 [[package]]
@@ -1036,30 +1026,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-std"
+name = "burn-rocm"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "ahash",
- "bytemuck",
- "bytes",
- "cubecl-common",
- "cubecl-environment",
- "cubecl-zspace",
- "data-encoding",
- "derive-new",
- "enumset",
- "half",
- "hashbrown 0.16.1",
- "num-traits",
- "portable-atomic-util",
- "rand 0.10.2",
- "rand_distr",
- "serde",
- "smallvec",
- "spin 0.11.1",
- "thiserror 2.0.20",
- "uuid",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "cubecl",
 ]
 
 [[package]]
@@ -1090,20 +1063,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-store"
+name = "burn-std"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-pack 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "byteorder",
+ "ahash",
+ "bytemuck",
  "bytes",
+ "cubecl-common",
+ "cubecl-environment",
+ "cubecl-zspace",
+ "data-encoding",
+ "derive-new",
+ "enumset",
  "half",
  "hashbrown 0.16.1",
- "memmap2",
- "regex",
- "safetensors 0.7.0",
- "textdistance",
+ "num-traits",
+ "portable-atomic-util",
+ "rand 0.10.2",
+ "rand_distr",
+ "serde",
+ "smallvec",
+ "spin 0.11.1",
+ "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]
@@ -1124,16 +1107,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-tch"
+name = "burn-store"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "cc",
- "libc",
- "log",
- "tch",
- "torch-sys",
+ "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-pack 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "byteorder",
+ "bytes",
+ "half",
+ "hashbrown 0.16.1",
+ "memmap2",
+ "regex",
+ "safetensors 0.7.0",
+ "textdistance",
 ]
 
 [[package]]
@@ -1150,17 +1137,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-tensor"
+name = "burn-tch"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-dispatch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "colored",
- "derive-new",
- "num-traits",
- "serde",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "cc",
+ "libc",
+ "log",
+ "tch",
+ "torch-sys",
 ]
 
 [[package]]
@@ -1178,25 +1164,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-vision"
+name = "burn-tensor"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "aligned-vec",
- "bon",
- "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "bytemuck",
- "cubecl",
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-dispatch 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "colored",
  "derive-new",
- "half",
- "image",
- "macerator",
- "ndarray 0.17.2",
  "num-traits",
- "paste",
  "serde",
 ]
 
@@ -1222,13 +1199,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "burn-wgpu"
+name = "burn-vision"
 version = "0.22.0-pre.3"
-source = "git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8#a69b3a539330924b0a520a7c7e630f03cb269fa8"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
 dependencies = [
- "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
- "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "aligned-vec",
+ "bon",
+ "burn-core 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-ir 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-std 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "bytemuck",
  "cubecl",
+ "derive-new",
+ "half",
+ "image",
+ "macerator",
+ "ndarray 0.17.2",
+ "num-traits",
+ "paste",
+ "serde",
 ]
 
 [[package]]
@@ -1238,6 +1228,16 @@ source = "git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68
 dependencies = [
  "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
  "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=2d1084f760c8f948433d960d68cb667ca31b7290)",
+ "cubecl",
+]
+
+[[package]]
+name = "burn-wgpu"
+version = "0.22.0-pre.3"
+source = "git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de#92b43c53e732b309187024c08f1ae08a77a1d1de"
+dependencies = [
+ "burn-backend 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
+ "burn-cubecl 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "cubecl",
 ]
 
@@ -2420,9 +2420,9 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 name = "dql-poc"
 version = "0.1.0"
 dependencies = [
- "burn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "burn-onnx",
- "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
 ]
 
 [[package]]
@@ -2452,9 +2452,9 @@ name = "e5-embed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "burn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "burn-onnx",
- "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=a69b3a539330924b0a520a7c7e630f03cb269fa8)",
+ "burn-store 0.22.0-pre.3 (git+https://github.com/TsaoLun/burn-e5q?rev=92b43c53e732b309187024c08f1ae08a77a1d1de)",
  "memory-stats",
  "sentencepiece-rs",
  "serde",
