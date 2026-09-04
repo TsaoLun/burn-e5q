@@ -416,42 +416,74 @@ fn flash_head_d32(
                 qk_bias,
             );
 
-            for qi in 0..bq {
-                let gqi = q0 + qi;
-                let row = &mut score_block[qi * TILE..qi * TILE + tile_kv];
-                apply_mask_bias_causal(
-                    row,
-                    gqi,
-                    kv_start,
-                    mask,
-                    row_bias,
-                    causal_offset,
-                    p.mask_q_step,
-                    p.bias_q_step,
-                );
-
-                let tile_max = max_slice(row);
-                if tile_max == f32::NEG_INFINITY {
-                    row.fill(0.0);
-                    continue;
+            let e5_softmax =
+                tile_kv == TILE && mask.is_none() && row_bias.is_none() && causal_offset.is_none();
+            #[cfg(all(target_arch = "x86_64", feature = "std"))]
+            let e5_softmax = e5_softmax && avx512f_available();
+            #[cfg(all(target_arch = "x86_64", feature = "std"))]
+            if e5_softmax {
+                let mut qi = 0;
+                while qi + 4 <= bq {
+                    // SAFETY: avx512f checked; four full TILE score rows.
+                    unsafe {
+                        online_softmax_4(
+                            &mut score_block[qi * TILE..(qi + 4) * TILE],
+                            q0 + qi,
+                            row_max,
+                            row_sum,
+                            output,
+                        );
+                    }
+                    qi += 4;
                 }
-
-                let new_max = if row_max[gqi] > tile_max {
-                    row_max[gqi]
-                } else {
-                    tile_max
-                };
-                let tile_sum = exp_sub_inplace(row, new_max);
-                let correction = if row_max[gqi] == f32::NEG_INFINITY {
-                    0.0
-                } else {
-                    (row_max[gqi] - new_max).exp()
-                };
-
-                let out_row = &mut output[gqi * D..gqi * D + D];
-                scale_row32(out_row, correction);
-                row_sum[gqi] = row_sum[gqi] * correction + tile_sum;
-                row_max[gqi] = new_max;
+                while qi < bq {
+                    online_softmax_one(
+                        &mut score_block[qi * TILE..qi * TILE + tile_kv],
+                        q0 + qi,
+                        row_max,
+                        row_sum,
+                        output,
+                        mask,
+                        row_bias,
+                        causal_offset,
+                        kv_start,
+                        p,
+                    );
+                    qi += 1;
+                }
+            } else {
+                for qi in 0..bq {
+                    online_softmax_one(
+                        &mut score_block[qi * TILE..qi * TILE + tile_kv],
+                        q0 + qi,
+                        row_max,
+                        row_sum,
+                        output,
+                        mask,
+                        row_bias,
+                        causal_offset,
+                        kv_start,
+                        p,
+                    );
+                }
+            }
+            #[cfg(not(all(target_arch = "x86_64", feature = "std")))]
+            {
+                let _ = e5_softmax;
+                for qi in 0..bq {
+                    online_softmax_one(
+                        &mut score_block[qi * TILE..qi * TILE + tile_kv],
+                        q0 + qi,
+                        row_max,
+                        row_sum,
+                        output,
+                        mask,
+                        row_bias,
+                        causal_offset,
+                        kv_start,
+                        p,
+                    );
+                }
             }
 
             pv_block(
@@ -472,6 +504,163 @@ fn flash_head_d32(
             scale_row32(&mut output[qi * D..qi * D + D], 1.0 / sum);
         }
     }
+}
+
+fn online_softmax_one(
+    row: &mut [f32],
+    gqi: usize,
+    row_max: &mut [f32],
+    row_sum: &mut [f32],
+    output: &mut [f32],
+    mask: Option<&[u8]>,
+    row_bias: Option<&[f32]>,
+    causal_offset: Option<isize>,
+    kv_start: usize,
+    p: &HeadParams,
+) {
+    apply_mask_bias_causal(
+        row,
+        gqi,
+        kv_start,
+        mask,
+        row_bias,
+        causal_offset,
+        p.mask_q_step,
+        p.bias_q_step,
+    );
+
+    let tile_max = max_slice(row);
+    if tile_max == f32::NEG_INFINITY {
+        row.fill(0.0);
+        return;
+    }
+
+    let new_max = if row_max[gqi] > tile_max {
+        row_max[gqi]
+    } else {
+        tile_max
+    };
+    let tile_sum = exp_sub_inplace(row, new_max);
+    let correction = if row_max[gqi] == f32::NEG_INFINITY {
+        0.0
+    } else {
+        (row_max[gqi] - new_max).exp()
+    };
+
+    let out_row = &mut output[gqi * D..gqi * D + D];
+    scale_row32(out_row, correction);
+    row_sum[gqi] = row_sum[gqi] * correction + tile_sum;
+    row_max[gqi] = new_max;
+}
+
+/// Four full TILE rows: interleave max / Cephes exp / output rescale so
+/// the long `exp` latency of one row overlaps the others. Same arithmetic
+/// as [`online_softmax_one`].
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn online_softmax_4(
+    scores: &mut [f32],
+    q0: usize,
+    row_max: &mut [f32],
+    row_sum: &mut [f32],
+    output: &mut [f32],
+) {
+    debug_assert_eq!(scores.len(), 4 * TILE);
+    unsafe {
+        let m0 = max_slice_avx512_64(&scores[0..TILE]);
+        let m1 = max_slice_avx512_64(&scores[TILE..2 * TILE]);
+        let m2 = max_slice_avx512_64(&scores[2 * TILE..3 * TILE]);
+        let m3 = max_slice_avx512_64(&scores[3 * TILE..4 * TILE]);
+        // Match `online_softmax_one`: a fully-masked row must not
+        // `exp(x - (-inf))`. e5 has no mask; keep the interleaved
+        // exp/scale on the finite-max hot path.
+        if m0 == f32::NEG_INFINITY
+            || m1 == f32::NEG_INFINITY
+            || m2 == f32::NEG_INFINITY
+            || m3 == f32::NEG_INFINITY
+        {
+            softmax4_one_row(&mut scores[0..TILE], q0, m0, row_max, row_sum, output);
+            softmax4_one_row(
+                &mut scores[TILE..2 * TILE],
+                q0 + 1,
+                m1,
+                row_max,
+                row_sum,
+                output,
+            );
+            softmax4_one_row(
+                &mut scores[2 * TILE..3 * TILE],
+                q0 + 2,
+                m2,
+                row_max,
+                row_sum,
+                output,
+            );
+            softmax4_one_row(
+                &mut scores[3 * TILE..4 * TILE],
+                q0 + 3,
+                m3,
+                row_max,
+                row_sum,
+                output,
+            );
+            return;
+        }
+        let (n0, c0) = online_new_max(row_max[q0], m0);
+        let (n1, c1) = online_new_max(row_max[q0 + 1], m1);
+        let (n2, c2) = online_new_max(row_max[q0 + 2], m2);
+        let (n3, c3) = online_new_max(row_max[q0 + 3], m3);
+        let s0 = exp_sub_inplace_avx512_64(&mut scores[0..TILE], n0);
+        let s1 = exp_sub_inplace_avx512_64(&mut scores[TILE..2 * TILE], n1);
+        let s2 = exp_sub_inplace_avx512_64(&mut scores[2 * TILE..3 * TILE], n2);
+        let s3 = exp_sub_inplace_avx512_64(&mut scores[3 * TILE..4 * TILE], n3);
+        scale_row32(&mut output[q0 * D..(q0 + 1) * D], c0);
+        scale_row32(&mut output[(q0 + 1) * D..(q0 + 2) * D], c1);
+        scale_row32(&mut output[(q0 + 2) * D..(q0 + 3) * D], c2);
+        scale_row32(&mut output[(q0 + 3) * D..(q0 + 4) * D], c3);
+        row_sum[q0] = row_sum[q0] * c0 + s0;
+        row_sum[q0 + 1] = row_sum[q0 + 1] * c1 + s1;
+        row_sum[q0 + 2] = row_sum[q0 + 2] * c2 + s2;
+        row_sum[q0 + 3] = row_sum[q0 + 3] * c3 + s3;
+        row_max[q0] = n0;
+        row_max[q0 + 1] = n1;
+        row_max[q0 + 2] = n2;
+        row_max[q0 + 3] = n3;
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn softmax4_one_row(
+    row: &mut [f32],
+    gqi: usize,
+    tile_max: f32,
+    row_max: &mut [f32],
+    row_sum: &mut [f32],
+    output: &mut [f32],
+) {
+    if tile_max == f32::NEG_INFINITY {
+        row.fill(0.0);
+        return;
+    }
+    let (new_max, correction) = online_new_max(row_max[gqi], tile_max);
+    let tile_sum = unsafe { exp_sub_inplace_avx512_64(row, new_max) };
+    scale_row32(&mut output[gqi * D..gqi * D + D], correction);
+    row_sum[gqi] = row_sum[gqi] * correction + tile_sum;
+    row_max[gqi] = new_max;
+}
+
+fn online_new_max(prev: f32, tile_max: f32) -> (f32, f32) {
+    if tile_max == f32::NEG_INFINITY {
+        return (prev, 1.0);
+    }
+    let new_max = if prev > tile_max { prev } else { tile_max };
+    let correction = if prev == f32::NEG_INFINITY {
+        0.0
+    } else {
+        (prev - new_max).exp()
+    };
+    (new_max, correction)
 }
 
 fn apply_mask_bias_causal(
@@ -573,6 +762,12 @@ fn scale_row32(row: &mut [f32], scale: f32) {
 }
 
 fn transpose_k_tile(k: &[f32], kv_start: usize, tile_kv: usize, k_t: &mut [f32; D * TILE]) {
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    if tile_kv == TILE && avx512f_available() {
+        // SAFETY: avx512f implies AVX; 8×8 ymm transpose of a full TILE.
+        unsafe { transpose_k_tile_avx(k, kv_start, k_t) };
+        return;
+    }
     if tile_kv < TILE {
         k_t.fill(0.0);
     }
@@ -581,6 +776,68 @@ fn transpose_k_tile(k: &[f32], kv_start: usize, tile_kv: usize, k_t: &mut [f32; 
         for d in 0..D {
             k_t[d * TILE + ki] = krow[d];
         }
+    }
+}
+
+/// 8×8 AVX transpose of each `[8, 8]` block in a `[64, 32]` K tile.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx")]
+unsafe fn transpose_k_tile_avx(k: &[f32], kv_start: usize, k_t: &mut [f32; D * TILE]) {
+    use core::arch::x86_64::*;
+    unsafe {
+        let kp = k.as_ptr().add(kv_start * D);
+        let tp = k_t.as_mut_ptr();
+        let mut ki0 = 0;
+        while ki0 < TILE {
+            let mut d0 = 0;
+            while d0 < D {
+                let mut r = [_mm256_setzero_ps(); 8];
+                for i in 0..8 {
+                    r[i] = _mm256_loadu_ps(kp.add((ki0 + i) * D + d0));
+                }
+                transpose8x8_ps(&mut r);
+                for i in 0..8 {
+                    _mm256_storeu_ps(tp.add((d0 + i) * TILE + ki0), r[i]);
+                }
+                d0 += 8;
+            }
+            ki0 += 8;
+        }
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx")]
+#[allow(unused_unsafe)]
+unsafe fn transpose8x8_ps(r: &mut [core::arch::x86_64::__m256; 8]) {
+    use core::arch::x86_64::*;
+    unsafe {
+        let t0 = _mm256_unpacklo_ps(r[0], r[1]);
+        let t1 = _mm256_unpackhi_ps(r[0], r[1]);
+        let t2 = _mm256_unpacklo_ps(r[2], r[3]);
+        let t3 = _mm256_unpackhi_ps(r[2], r[3]);
+        let t4 = _mm256_unpacklo_ps(r[4], r[5]);
+        let t5 = _mm256_unpackhi_ps(r[4], r[5]);
+        let t6 = _mm256_unpacklo_ps(r[6], r[7]);
+        let t7 = _mm256_unpackhi_ps(r[6], r[7]);
+
+        let tt0 = _mm256_shuffle_ps(t0, t2, 0x44);
+        let tt1 = _mm256_shuffle_ps(t0, t2, 0xEE);
+        let tt2 = _mm256_shuffle_ps(t1, t3, 0x44);
+        let tt3 = _mm256_shuffle_ps(t1, t3, 0xEE);
+        let tt4 = _mm256_shuffle_ps(t4, t6, 0x44);
+        let tt5 = _mm256_shuffle_ps(t4, t6, 0xEE);
+        let tt6 = _mm256_shuffle_ps(t5, t7, 0x44);
+        let tt7 = _mm256_shuffle_ps(t5, t7, 0xEE);
+
+        r[0] = _mm256_permute2f128_ps(tt0, tt4, 0x20);
+        r[1] = _mm256_permute2f128_ps(tt1, tt5, 0x20);
+        r[2] = _mm256_permute2f128_ps(tt2, tt6, 0x20);
+        r[3] = _mm256_permute2f128_ps(tt3, tt7, 0x20);
+        r[4] = _mm256_permute2f128_ps(tt0, tt4, 0x31);
+        r[5] = _mm256_permute2f128_ps(tt1, tt5, 0x31);
+        r[6] = _mm256_permute2f128_ps(tt2, tt6, 0x31);
+        r[7] = _mm256_permute2f128_ps(tt3, tt7, 0x31);
     }
 }
 
@@ -1078,6 +1335,137 @@ mod tests {
     fn d32_stays_off_for_short_seq() {
         let q = flex_f32(vec![1.0; 1 * 1 * 8 * D], &[1, 1, 8, D]);
         assert!(!should_use(&q, &q, &q, &Default::default()));
+    }
+
+    #[test]
+    fn transpose_k_tile_matches_scalar() {
+        let k: Vec<f32> = (0..2 * TILE * D)
+            .map(|i| (i as f32) * 0.017 - 3.1)
+            .collect();
+        let mut simd = [0.0f32; D * TILE];
+        let mut scalar = [0.0f32; D * TILE];
+        for ki in 0..TILE {
+            let krow = &k[ki * D..];
+            for d in 0..D {
+                scalar[d * TILE + ki] = krow[d];
+            }
+        }
+        transpose_k_tile(&k, 0, TILE, &mut simd);
+        for i in 0..D * TILE {
+            assert_eq!(
+                simd[i], scalar[i],
+                "k_t[{i}] simd={} scalar={}",
+                simd[i], scalar[i]
+            );
+        }
+        // Offset tile (kv_start = TILE) and a short tail.
+        transpose_k_tile(&k, TILE, TILE, &mut simd);
+        for ki in 0..TILE {
+            let krow = &k[(TILE + ki) * D..];
+            for d in 0..D {
+                assert_eq!(simd[d * TILE + ki], krow[d]);
+            }
+        }
+        transpose_k_tile(&k, 0, 17, &mut simd);
+        for d in 0..D {
+            for ki in 0..TILE {
+                let expect = if ki < 17 { k[ki * D + d] } else { 0.0 };
+                assert_eq!(simd[d * TILE + ki], expect);
+            }
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    #[test]
+    fn online_softmax_4_matches_one() {
+        if !avx512f_available() {
+            return;
+        }
+        let dummy = HeadParams {
+            seq_q: 4,
+            seq_kv: TILE,
+            scale: 1.0,
+            causal_offset: None,
+            q_batch_stride: 0,
+            k_batch_stride: 0,
+            v_batch_stride: 0,
+            q_head_stride: 0,
+            k_head_stride: 0,
+            v_head_stride: 0,
+            q_per_kv: 1,
+            mask_batch_step: 0,
+            mask_head_step: 0,
+            mask_q_step: 0,
+            mask_tile_len: 0,
+            bias_batch_step: 0,
+            bias_head_step: 0,
+            bias_q_step: 0,
+            bias_tile_len: 0,
+        };
+        let check = |mask_row1: bool| {
+            let mut four = [0.0f32; 4 * TILE];
+            let mut one = [0.0f32; 4 * TILE];
+            for i in 0..4 * TILE {
+                let v = ((i % 53) as f32) * 0.11 - 2.4;
+                four[i] = v;
+                one[i] = v;
+            }
+            if mask_row1 {
+                for x in &mut four[TILE..2 * TILE] {
+                    *x = f32::NEG_INFINITY;
+                }
+                for x in &mut one[TILE..2 * TILE] {
+                    *x = f32::NEG_INFINITY;
+                }
+            }
+            let mut max4 = [f32::NEG_INFINITY; 4];
+            let mut max1 = [f32::NEG_INFINITY; 4];
+            let mut sum4 = [0.0f32; 4];
+            let mut sum1 = [0.0f32; 4];
+            let mut out4 = [0.3f32; 4 * D];
+            let mut out1 = [0.3f32; 4 * D];
+            // SAFETY: gated on avx512f; four full TILE rows.
+            unsafe {
+                online_softmax_4(&mut four, 0, &mut max4, &mut sum4, &mut out4);
+            }
+            for qi in 0..4 {
+                online_softmax_one(
+                    &mut one[qi * TILE..(qi + 1) * TILE],
+                    qi,
+                    &mut max1,
+                    &mut sum1,
+                    &mut out1,
+                    None,
+                    None,
+                    None,
+                    0,
+                    &dummy,
+                );
+            }
+            for i in 0..4 * TILE {
+                let err = (four[i] - one[i]).abs();
+                assert!(
+                    err < 1e-6,
+                    "mask_row1={mask_row1} scores[{i}] 4-row={} one={} err={err:e}",
+                    four[i],
+                    one[i]
+                );
+            }
+            for qi in 0..4 {
+                assert!((max4[qi] - max1[qi]).abs() < 1e-6 || max4[qi] == max1[qi]);
+                assert!((sum4[qi] - sum1[qi]).abs() < 1e-5);
+                for d in 0..D {
+                    let a = out4[qi * D + d];
+                    let b = out1[qi * D + d];
+                    assert!(
+                        (a - b).abs() < 1e-6,
+                        "mask_row1={mask_row1} out[{qi},{d}] {a} vs {b}"
+                    );
+                }
+            }
+        };
+        check(false);
+        check(true);
     }
 
     #[test]

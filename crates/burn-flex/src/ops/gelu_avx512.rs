@@ -115,6 +115,18 @@ unsafe fn gelu_ptr_avx512(dst: *mut f32, src: *const f32, n: usize, _sqrt2: f32)
     use core::arch::x86_64::*;
     unsafe {
         let mut i = 0;
+        // Two independent GELUs hide the long erf / div latency. The
+        // compiler keeps both live; each call still uses the same musl
+        // piecewise rationals (not A&S).
+        while i + 32 <= n {
+            let x0 = _mm512_loadu_ps(src.add(i));
+            let x1 = _mm512_loadu_ps(src.add(i + 16));
+            let y0 = gelu_ps_avx512(x0);
+            let y1 = gelu_ps_avx512(x1);
+            _mm512_storeu_ps(dst.add(i), y0);
+            _mm512_storeu_ps(dst.add(i + 16), y1);
+            i += 32;
+        }
         while i + 16 <= n {
             let x = _mm512_loadu_ps(src.add(i));
             _mm512_storeu_ps(dst.add(i), gelu_ps_avx512(x));
@@ -200,6 +212,73 @@ mod coef {
     pub const IX_INF: i32 = 0x7f80_0000;
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+#[inline]
+unsafe fn copysign_ps(
+    src_sign: core::arch::x86_64::__m512,
+    mag: core::arch::x86_64::__m512,
+) -> core::arch::x86_64::__m512 {
+    use core::arch::x86_64::*;
+    unsafe {
+        let sign_bit = _mm512_castsi512_ps(_mm512_set1_epi32(0x8000_0000u32 as i32));
+        _mm512_or_ps(mag, _mm512_and_ps(src_sign, sign_bit))
+    }
+}
+
+/// `|x| < 0.84375`: `x + x * P(z)/Q(z)`, `z = x²`. Already signed.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+#[inline]
+#[allow(unused_unsafe)]
+unsafe fn erf_small_ps(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
+    use coef::*;
+    use core::arch::x86_64::*;
+    unsafe {
+        let z2 = _mm512_mul_ps(x, x);
+        let mut rp = _mm512_set1_ps(PP4);
+        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP3));
+        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP2));
+        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP1));
+        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP0));
+        let mut qq = _mm512_set1_ps(QQ5);
+        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ4));
+        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ3));
+        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ2));
+        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ1));
+        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(1.0));
+        _mm512_fmadd_ps(x, _mm512_div_ps(rp, qq), x)
+    }
+}
+
+/// `0.84375 <= |x| < 1.25`: `ERX + P(s)/Q(s)`, `s = |x| - 1`. Magnitude only.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+#[inline]
+#[allow(unused_unsafe)]
+unsafe fn erf_mid_ps(ax: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
+    use coef::*;
+    use core::arch::x86_64::*;
+    unsafe {
+        let s = _mm512_sub_ps(ax, _mm512_set1_ps(1.0));
+        let mut pa = _mm512_set1_ps(PA6);
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA5));
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA4));
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA3));
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA2));
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA1));
+        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA0));
+        let mut qa = _mm512_set1_ps(QA6);
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA5));
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA4));
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA3));
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA2));
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA1));
+        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(1.0));
+        _mm512_add_ps(_mm512_set1_ps(ERX), _mm512_div_ps(pa, qa))
+    }
+}
+
 /// 16-wide `erff`. Same regions as libm; the `|x| >= 1.25` tail uses two
 /// Cephes `exp` evaluations in place of scalar `expf`.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
@@ -237,41 +316,23 @@ unsafe fn erf_ps_avx512(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__
         );
         let mask_special = _mm512_cmpge_epu32_mask(ix, _mm512_set1_epi32(IX_INF));
 
-        // |x| < 0.84375: x + x * P(z)/Q(z), z = x². Already signed.
-        let z2 = _mm512_mul_ps(x, x);
-        let mut rp = _mm512_set1_ps(PP4);
-        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP3));
-        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP2));
-        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP1));
-        rp = _mm512_fmadd_ps(rp, z2, _mm512_set1_ps(PP0));
-        let mut qq = _mm512_set1_ps(QQ5);
-        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ4));
-        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ3));
-        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ2));
-        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(QQ1));
-        qq = _mm512_fmadd_ps(qq, z2, _mm512_set1_ps(1.0));
-        let y_small = _mm512_fmadd_ps(x, _mm512_div_ps(rp, qq), x);
+        // Uniform-region early-out: skip the unused piecewise rationals.
+        // Same polynomials as before when a lane needs that region.
+        if mask_special == 0 && mask_sat == 0xFFFF {
+            return copysign_ps(x, _mm512_set1_ps(1.0));
+        }
+        if mask_special == 0 && mask_small == 0xFFFF {
+            return erf_small_ps(x);
+        }
 
-        // 0.84375 <= |x| < 1.25: erf = ERX + P(s)/Q(s), s = |x| - 1.
-        let s = _mm512_sub_ps(ax, _mm512_set1_ps(1.0));
-        let mut pa = _mm512_set1_ps(PA6);
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA5));
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA4));
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA3));
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA2));
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA1));
-        pa = _mm512_fmadd_ps(pa, s, _mm512_set1_ps(PA0));
-        let mut qa = _mm512_set1_ps(QA6);
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA5));
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA4));
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA3));
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA2));
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(QA1));
-        qa = _mm512_fmadd_ps(qa, s, _mm512_set1_ps(1.0));
-        let y_mid = _mm512_add_ps(_mm512_set1_ps(ERX), _mm512_div_ps(pa, qa));
-
-        let mut y = y_small;
-        y = _mm512_mask_blend_ps(mask_mid, y, y_mid);
+        let mut y = if mask_small != 0 {
+            erf_small_ps(x)
+        } else {
+            _mm512_setzero_ps()
+        };
+        if mask_mid != 0 {
+            y = _mm512_mask_blend_ps(mask_mid, y, erf_mid_ps(ax));
+        }
 
         let need_exp = mask_ra | mask_rb;
         if need_exp != 0 {
@@ -338,7 +399,11 @@ unsafe fn erf_ps_avx512(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__
         y = _mm512_mask_blend_ps(mask_sat, y, _mm512_set1_ps(1.0));
         // Apply sign on every region except the already-signed small poly.
         let y_signed = _mm512_or_ps(y, _mm512_and_ps(x, sign_bit));
-        y = _mm512_mask_blend_ps(mask_small, y_signed, y_small);
+        if mask_small != 0 {
+            y = _mm512_mask_blend_ps(mask_small, y_signed, y);
+        } else {
+            y = y_signed;
+        }
 
         if mask_special != 0 {
             // libm: 1 - 2*sign + 1/x   (erf(±inf)=±1, erf(nan)=nan)
