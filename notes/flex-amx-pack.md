@@ -38,5 +38,27 @@ C-lite 仍不挂钩。TILE 仍是 64。
 
 ## 对拍（本机 4 核 Xeon，flex release；进程分开跑）
 
-待 `compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 填。
-对外 512 用 compare_ort 的 `forward_raw`。不要用 Mac Python 4.3 / 201。
+`compare_ort` 主表仍印 Mac Python 4.3 / 1412 / 201。分母用本轮单独
+`ort-mem`（arena off）：短 **3.6** / packed **1167** / 512 **53.5**。
+
+| 口径 | Q-block | **这一刀** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 10.1 | **3.2** | 3.6 | **0.9×** |
+| packed batch `embed_passages` | 1686 | **1501** | 1167 | **1.3×**（burn 含 SP） |
+| 512 `forward_raw` | 149 | **123.6** | 53.5 | **2.3×** |
+| 4×512 `mem_stress` | 2938 | **2609** | 476 | **5.5×** |
+
+mean cos **0.9950**（min **0.9876**），ranking 2/2。
+`forward_raw` **149 → 123.6**（−25 ms）。短序列从 10.1 掉到 3.2：小 M
+时 pack 占比极高，缓存命中后几乎只剩 `tdpbusd`。
+
+隔离 FFN1 ×12 仍是 **27.5 ms**——breakdown 每次换新 B，打不中缓存。
+真实 forward 热身之后权重指针不变。FFN2 隔离 **6.0 → 4.2 ms**。
+flash ×12 仍约 **42 ms**。
+
+`mem_stress -- 5 2048`：稳态 RSS **233 / 257 MB**（packed-B 缓存约 +20 MB）。
+Rust ort 同预算 **195 / 348 MB**。4×512 五轮 2529–2833，中位 2609。
+
+到 2×（512 ~107 ms）还差 ~16 ms。大头变成 flash（42）和 fused LN / GELU。
+不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。
+下一刀：AVX-512 LN（D=384）或整层 FFN 融合。

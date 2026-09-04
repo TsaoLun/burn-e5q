@@ -702,5 +702,92 @@ mean cos **0.9950**（min 0.9876），ranking 2/2。
 | DQL ×48 | 4.9 | ~3% |
 | dequant | 6 | ~4% |
 
-下一刀：整层 FFN 融合（少扫 `[1,512,1536]`），或再砍 LN。
+下一刀 AMX packed-B 已做（见下节）。
+不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
+
+---
+
+# AMX packed-B 缓存
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-amx-pack` `2a05a84`（叠在 Q-block flash 上）。
+> 实现：`notes/flex-amx-pack.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+i8 权重缓存 AMX B 布局 + 列和。pack SSE2，zp/sums AVX-512。`tdpbusd` 串行。
+
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+
+| 场景 | Q-block | **AMX pack** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 10.1 | **3.2** | **3.6** | **0.9×** |
+| packed batch `embed_passages` | 1686 | **1501** | **1167** | **1.3×** |
+| 512 `forward_raw` | 149 | **123.6** | **53.5** | **2.3×** |
+| 512 `embed_passages` | 628 | **604** | 53.5 | 含 ~478 ms SP |
+| 4×512 `mem_stress` | 2938 | **2609** | **476** | **5.5×** |
+
+`forward_raw` **149 → 123.6**（−25 ms）。短 **10.1 → 3.2**（pack 不再每 token 付）。
+隔离 FFN1 仍 27.5 ms（每次新 B）。`mem_stress` RSS **233 / 257 MB**。
+
+---
+
+# 本机再对 Rust ort（AMX pack 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-amx-pack` `2a05a84`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 ids。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **3.2 ms** | **3.6 ms** | **0.9×** | 只有模型 |
+| 16 tok `embed_passages` | 6.8 ms | 3.6 ms | 1.9× | burn 含 3.5 ms SP |
+| packed batch | 1501 ms | **1167 ms** | 1.3× | burn 含 SP |
+| 512 `forward_raw` | **123.6 ms** | **53.5 ms** | **2.3×** | 只有模型 |
+| 512 `embed_passages` | 604 ms | 53.5 ms | 11.3× | burn 含 ~478 ms SP |
+| 4×512 `mem_stress` | 2609 ms | **476 ms** | **5.5×** | dummy ids，无 SP |
+
+到 2× 按 ~54 ms → **~107 ms**，还差 ~16 ms。
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **312** | **5000** | **278** | **4440** |
+| packed batch | 5.3 | 398 | 6.0 | 508 |
+| 512 模型 | **8.1** | **4142** | **18.7** | **9576** |
+| 4×512 | 1.5 | 786 | 8.4 | 4303 |
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9950** | **0.9968** |
+| min cos | 0.9876 | 0.9956 |
+| ranking top-3 | 2/2 | — |
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn AMX pack | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.3 / 3.3 | 7.1 / 7.1 |
+| 模型加载后 | **87.7 / 97.5** | 155 / 235 |
+| 4×512 稳态 / HWM | **233 / 257** | **195 / 348** |
+| compare 全流程 | 244 / 281 | 195 / 348 |
+
+两边都进 512 MB。packed-B 缓存大约 +20 MB RSS。
+
+## 512 模型里还剩什么（breakdown / ~124 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **42** | **~34%** |
+| MMI 72（隔离；整网缓存更轻） | 18–50 | ~20–30% |
+| fused LN ×25 | 22 | ~18% |
+| fused GELU ×12 | 18 | ~15% |
+| DQL ×48 | 4.9 | ~4% |
+| dequant | 6 | ~5% |
+
+下一刀：AVX-512 LN（D=384），或整层 FFN 融合。
 不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
