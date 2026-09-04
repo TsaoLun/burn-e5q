@@ -18,7 +18,8 @@ AMX 之后 512 `forward_raw` **414 ms / 7.7×** 本机 Rust ort 53.8 ms。
 3. PV 用两路 zmm 累加（和 `attention_int8` 的 D=32 一样）
 
 算法仍是 flash（不物化 `[S,S]`）。短序列 / 别的 D / softcap 仍走 `gemm::gemm`。
-`(batch × heads)` 的 rayon 按 CPU 数切块（packed `[8,12,512]` 是 96 个 head；一 head 一任务会把 packed 从 3.8 s 打到 19 s）。
+`(batch × heads)` 的 rayon 按 CPU 数切块。每个 worker 开 MXCSR FTZ+DAZ：
+packed `[7,512]`（6 行短句 pad）否则会在 denormal QK/PV 上耗到 ~19 s。
 
 ### 2. `[1,1,1,S]` mask/bias 不再展开成 `[H,S,S]`
 
