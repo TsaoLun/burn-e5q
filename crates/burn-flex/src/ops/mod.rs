@@ -92,6 +92,7 @@ pub mod activation;
 pub mod attention;
 pub(crate) mod attention_d32;
 pub(crate) mod gelu_avx512;
+pub(crate) mod ln_avx512;
 pub(crate) mod attention_int8;
 pub mod binary;
 mod bool;

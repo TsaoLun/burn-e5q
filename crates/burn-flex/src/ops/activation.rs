@@ -622,9 +622,11 @@ pub fn layer_norm(
             input.dtype(),
         );
     }
-    let input = input.to_contiguous();
-    let gamma = gamma.to_contiguous();
-    let beta = beta.map(|b| b.to_contiguous());
+    // `to_contiguous()` clones even when already packed, which drops
+    // uniqueness and blocks the in-place AVX-512 path.
+    let input = take_owned_contiguous(input);
+    let gamma = take_owned_contiguous(gamma);
+    let beta = beta.map(take_owned_contiguous);
 
     let d_model = *input
         .layout()
@@ -664,6 +666,19 @@ pub fn layer_norm(
             layer_norm_via_f32::<bf16>(input, gamma, beta, epsilon, bf16::to_f32, bf16::from_f32)
         }
         dtype => panic!("burn_flex::layer_norm: unsupported dtype {:?}", dtype),
+    }
+}
+
+/// Keep the tensor if it already owns a packed buffer; otherwise copy.
+fn take_owned_contiguous(tensor: FlexTensor) -> FlexTensor {
+    if tensor.is_contiguous()
+        && tensor.layout().start_offset() == 0
+        && tensor.bytes().len()
+            == tensor.layout().num_elements() * crate::tensor::dtype_size(tensor.dtype())
+    {
+        tensor
+    } else {
+        tensor.to_contiguous()
     }
 }
 
@@ -804,7 +819,7 @@ fn welford_f64(row: &[f64], epsilon: f64) -> (f64, f64) {
 }
 
 fn layer_norm_f32(
-    input: FlexTensor,
+    mut input: FlexTensor,
     gamma: FlexTensor,
     beta: Option<FlexTensor>,
     epsilon: f32,
@@ -815,11 +830,39 @@ fn layer_norm_f32(
         return input;
     }
 
-    let input_data: &[f32] = input.storage();
     let gamma_data: &[f32] = gamma.storage();
     let beta_data: Option<&[f32]> = beta.as_ref().map(|b| b.storage());
+    let n = input.layout().num_elements();
+    let avx512 = cfg!(all(target_arch = "x86_64", feature = "std"))
+        && d_model.is_multiple_of(16)
+        && crate::ops::ln_avx512::available();
 
-    let n = input_data.len();
+    if avx512
+        && input.is_unique()
+        && input.layout().is_contiguous()
+        && input.layout().start_offset() == 0
+    {
+        let data: &mut [f32] = input.storage_mut();
+        match beta_data {
+            Some(b) => crate::ops::ln_avx512::rows_with_beta_inplace(
+                &mut data[..n],
+                gamma_data,
+                b,
+                d_model,
+                epsilon,
+            ),
+            None => crate::ops::ln_avx512::rows_no_beta_inplace(
+                &mut data[..n],
+                gamma_data,
+                d_model,
+                epsilon,
+            ),
+        }
+        return input;
+    }
+
+    let input_data: &[f32] = input.storage();
+    debug_assert_eq!(input_data.len(), n);
     // See softmax_last_f32 for the rationale on zero-init instead of
     // `spare_capacity_mut` + `&mut [f32]` cast: the latter creates a
     // reference to uninitialized f32 values, which is UB under Rust's
@@ -892,6 +935,11 @@ fn layer_norm_rows_f32_with_beta(
     assert_eq!(input.len() % d_model, 0);
     assert_eq!(gamma.len(), d_model);
     assert_eq!(beta.len(), d_model);
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    if d_model.is_multiple_of(16) && crate::ops::ln_avx512::available() {
+        crate::ops::ln_avx512::rows_with_beta(input, output, gamma, beta, d_model, epsilon);
+        return;
+    }
     #[cfg(feature = "simd")]
     layer_norm_rows_f32_with_beta_simd(input, output, gamma, beta, d_model, epsilon);
     #[cfg(not(feature = "simd"))]
@@ -915,6 +963,11 @@ fn layer_norm_rows_f32_no_beta(
     assert_eq!(input.len(), output.len());
     assert_eq!(input.len() % d_model, 0);
     assert_eq!(gamma.len(), d_model);
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    if d_model.is_multiple_of(16) && crate::ops::ln_avx512::available() {
+        crate::ops::ln_avx512::rows_no_beta(input, output, gamma, d_model, epsilon);
+        return;
+    }
     #[cfg(feature = "simd")]
     layer_norm_rows_f32_no_beta_simd(input, output, gamma, d_model, epsilon);
     #[cfg(not(feature = "simd"))]
@@ -1458,6 +1511,28 @@ mod tests {
         fused.into_data().assert_approx_eq::<f32>(
             &TensorData::new(expected, vec![2, 17]),
             Tolerance::absolute(1e-5),
+        );
+    }
+
+    #[test]
+    fn test_layer_norm_e5_hidden_d384() {
+        let rows = 32;
+        let d = 384;
+        let data: Vec<f32> = (0..rows * d)
+            .map(|i| ((i % 97) as f32) * 0.031 - 1.4)
+            .collect();
+        let gamma_data: Vec<f32> = (0..d).map(|i| 0.7 + (i as f32) * 0.001).collect();
+        let beta_data: Vec<f32> = (0..d).map(|i| ((i as f32) * 0.002) - 0.3).collect();
+        let expected = layer_norm_last_ref(&data, &gamma_data, Some(&beta_data), 1e-12f32, d);
+        let fused = crate::ops::activation::layer_norm(
+            flex_f32(data, &[rows, d]),
+            flex_f32(gamma_data, &[d]),
+            Some(flex_f32(beta_data, &[d])),
+            1e-12,
+        );
+        fused.into_data().assert_approx_eq::<f32>(
+            &TensorData::new(expected, vec![rows, d]),
+            Tolerance::absolute(2e-5),
         );
     }
 
