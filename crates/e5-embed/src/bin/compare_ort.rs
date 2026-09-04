@@ -348,10 +348,57 @@ fn main() -> anyhow::Result<()> {
     println!(
         "  long split: tokenize {tok_long:.1} ms + forward_raw {fwd_long:.1} ms (embed_passages {burn_long:.1})"
     );
+
+    // Same 16-token short passage, model only. Rust ort short is session.run
+    // on pre-encoded ids (`ort-mem`); embed_passages includes sentencepiece.
+    let short_ids = embedder.encode_prefixed(E5_PASSAGE_PREFIX, single[0])?;
+    let short_seq = short_ids.len().min(512);
+    let mut short_input = vec![1i64; short_seq];
+    let mut short_mask = vec![0i64; short_seq];
+    short_input[..short_seq].copy_from_slice(&short_ids[..short_seq]);
+    short_mask.fill(1);
+    let short_ids_t =
+        Tensor::<2, Int>::from_data(TensorData::new(short_input, [1, short_seq]), &device);
+    let short_mask_t =
+        Tensor::<2, Int>::from_data(TensorData::new(short_mask, [1, short_seq]), &device);
+    let short_tt_t = Tensor::<2, Int>::zeros([1, short_seq], &device);
+    let mut tok_short = f64::INFINITY;
+    for _ in 0..5 {
+        let t = Instant::now();
+        let _ = embedder.encode_prefixed(E5_PASSAGE_PREFIX, single[0])?;
+        tok_short = tok_short.min(t.elapsed().as_secs_f64() * 1e3);
+    }
+    let mut fwd_short = f64::INFINITY;
+    for _ in 0..5 {
+        let t = Instant::now();
+        let h = embedder.forward_raw(short_ids_t.clone(), short_mask_t.clone(), short_tt_t.clone());
+        let _ = std::hint::black_box(h);
+        fwd_short = fwd_short.min(t.elapsed().as_secs_f64() * 1e3);
+    }
     println!(
-        "  long vs Rust ort session 53.8 ms: model {:.1}× | embed_passages {:.1}×",
-        fwd_long / 53.8,
-        burn_long / 53.8
+        "  short split: tokenize {tok_short:.1} ms + forward_raw {fwd_short:.1} ms (embed_passages {burn_single:.1})"
+    );
+
+    // Live `cargo run --release -p ort-mem` on this 4-core Xeon (2026-09-04):
+    // arena off, pre-encoded ids, session.run + mean-pool. Not the Mac
+    // Python numbers in ref_data.json (4.3 / 1412 / 201).
+    const RUST_ORT_SHORT_MS: f64 = 3.5;
+    const RUST_ORT_PACKED_MS: f64 = 1099.4;
+    const RUST_ORT_512_MS: f64 = 53.8;
+    println!("\n=== vs this-machine Rust ort (ort-mem, arena off) ===");
+    println!(
+        "  short model:   forward_raw {fwd_short:.1} / {RUST_ORT_SHORT_MS:.1} = {:.1}×  (embed_passages {burn_single:.1} = {:.1}×, includes SP)",
+        fwd_short / RUST_ORT_SHORT_MS,
+        burn_single / RUST_ORT_SHORT_MS
+    );
+    println!(
+        "  packed batch:  embed_passages {burn_batch:.1} / {RUST_ORT_PACKED_MS:.1} = {:.1}×  (burn includes SP; ort is session only)",
+        burn_batch / RUST_ORT_PACKED_MS
+    );
+    println!(
+        "  512 model:     forward_raw {fwd_long:.1} / {RUST_ORT_512_MS:.1} = {:.1}×  (embed_passages {burn_long:.1} = {:.1}×, includes SP)",
+        fwd_long / RUST_ORT_512_MS,
+        burn_long / RUST_ORT_512_MS
     );
 
     println!("\n=== Throughput ===");

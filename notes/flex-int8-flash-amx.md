@@ -51,14 +51,16 @@ Rust 的 AMX intrinsic 还不稳定（`x86_amx_intrinsics`）。用 stable `asm!
 
 整数 QK 挂钩时 flash 279 ms、`forward_raw` 483 ms，所以拔掉了。
 
-| 场景 | 融 GELU/LN | **AMX** | Rust ort | 倍数 |
+| 场景 | 融 GELU/LN | **AMX** | 本机 Rust ort | 倍数 |
 |---|---:|---:|---:|---:|
-| 16 tok | 28.6 ms | **17.0 ms** | 2.4 ms | **7.1×** |
-| packed batch | 5.60 s | **3.83 s** | 936 ms | **4.1×** |
-| 512 `forward_raw` | 636 ms | **408–417 ms** | 53.8 ms | **7.6–7.8×** |
+| 16 tok `forward_raw` | — | **13.2 ms** | **3.5 ms** | **3.8×** |
+| 16 tok `embed_passages` | 28.6 ms | **16.8 ms** | 3.5 ms | 4.8×（含 SP） |
+| packed batch | 5.60 s | **3.83 s** | **1099 ms** | 3.5×（burn 含 SP） |
+| 512 `forward_raw` | 636 ms | **414 ms** | **53.8 ms** | **7.7×** |
 
 mean cos **0.9950**（min 0.9886），ranking 2/2。
-`mem_stress -- 5 2048`：4×512 稳态 **212 / 275 MB**，约 3.95 s/round。
+`mem_stress -- 5 2048`：4×512 稳态 **212 / 275 MB**，约 3.62 s/round。
+对本机 Rust ort 的活数见 `notes/poc-results.md`「本机再对 Rust ort」。
 
 ## 结论
 

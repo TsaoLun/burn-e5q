@@ -414,16 +414,54 @@ flex 大 GELU 走 rayon（仍是 `libm::erff`）。
 
 对齐的 72× MMI：228 ms @ 44 GOPS → **21 ms @ 280–600 GOPS（~11×）**。
 VNNI QK + 物化 `[S,S]`：flash 205 → **280 ms**，所以 `attention_flash` 仍走 tiled f32。
-`forward_raw` **636 → 408–417 ms（7.6–7.8×** Rust ort 53.8）。mean cos **0.9950**。
-
-| 场景 | 融 GELU/LN | **AMX + f32 flash** | Rust ort | 倍数 |
-|---|---:|---:|---:|---:|
-| 16 tok | 28.6 ms | **17.0 ms** | 2.4 ms | **7.1×** |
-| packed batch | 5.60 s | **3.83 s** | 936 ms | **4.1×** |
-| 512 `forward_raw` | 636 ms | **408 ms** | 53.8 ms | **7.6×** |
-| 512 `embed_passages` | 1151 ms | **879 ms** | — | 含 SP |
+`forward_raw` **636 → 414 ms**。mean cos **0.9950**。
+对本机 Rust ort 的活数见下一节（短 3.8× / 512 **7.7×**）。不要用 `compare_ort` 主表里的 Mac Python 4.3 / 201。
 
 `mem_stress -- 5 2048`：4×512 稳态 **212 / 275 MB**，约 3.95 s/round（进 512 MB）。
 
 模型里现在最大的是 f32 flash（208 ms / 50%）和 fused GELU 的 `erff`（~83 ms）。
 到 2× 还差 ~300 ms。不要再挂钩这版 C-lite，不要再调 TILE。
+
+---
+
+# 本机再对 Rust ort（AMX 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**（叠着跑会把 ORT 512 从 54 抬到 84）。
+> burn：`compare_ort` / `mem_stress -- 5 2048`（`vendor/burn-int8-flash-amx` `21dba0c`）。
+> Rust ort：`ort-mem` arena off，4 intra-op，预编码 `ref_data.json` ids。
+
+`compare_ort` 主表里的 4.3 / 1412 / 201 仍是 Mac Python ort，**不要当倍数分母**。下面用刚跑的 `ort-mem`。
+
+## 延迟（公平 = 预编码 ids）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **13.2 ms** | **3.5 ms** | **3.8×** | 只有模型 |
+| 16 tok `embed_passages` | 16.8 ms | 3.5 ms | 4.8× | burn 含 3.3 ms SP |
+| packed 7 条 | 3829 ms | **1099 ms** | 3.5× | burn 含 SP；ort 只有 session |
+| 512 `forward_raw` | **414 ms** | **53.8 ms** | **7.7×** | 只有模型 |
+| 512 `embed_passages` | 873 ms | 53.8 ms | 16.2× | burn 含 ~457 ms SP |
+| 4×512 `mem_stress` | 3620 ms | **458 ms** | **7.9×** | dummy ids，无 SP |
+
+512 的 53.8 ms 和融 DQL 时记下的数一致。短句这次是 3.5 ms（当时 2.4）；packed 1099（当时 936）。用这次的活数。
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9950** | **0.9968** |
+| min cos | 0.9886 | 0.9956 |
+| ranking top-3 | 2/2 | — |
+
+跨引擎仍是 int8 固有分歧，不是 AMX 算错。
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn AMX | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.1 / 3.2 | 7.2 / 7.2 |
+| 模型加载后 | **87.4 / 97.2** | 156 / 235 |
+| 4×512 稳态 / HWM | **212 / 275** | **196 / 350** |
+| compare 全流程 | 236 / 335 | 196 / 350 |
+
+两边都进 512 MB。加载更轻的是 burn；4×512 HWM 也是 burn 更低（275 vs 350）。稳态 RSS burn 大约 +16 MB。
