@@ -159,17 +159,36 @@ pub(crate) fn flash_d32(
     #[cfg(feature = "rayon")]
     if batch * heads > 1 {
         run_heads_rayon(
-            batch, heads, o_head_stride, q_data, k_data, v_data, &mut output, mask_data,
-            bias_data, &params,
+            batch,
+            heads,
+            o_head_stride,
+            q_data,
+            k_data,
+            v_data,
+            &mut output,
+            mask_data,
+            bias_data,
+            &params,
         );
     } else {
+        let mut scratch = FlashScratch::with_seq(seq_q);
         one_head(
-            0, 0, q_data, k_data, v_data, &mut output, mask_data, bias_data, &params,
+            0,
+            0,
+            q_data,
+            k_data,
+            v_data,
+            &mut output,
+            mask_data,
+            bias_data,
+            &params,
+            &mut scratch,
         );
     }
 
     #[cfg(not(feature = "rayon"))]
     {
+        let mut scratch = FlashScratch::with_seq(seq_q);
         for b in 0..batch {
             for h in 0..heads {
                 let o_off = (b * heads + h) * o_head_stride;
@@ -183,7 +202,9 @@ pub(crate) fn flash_d32(
                     mask_data,
                     bias_data,
                     &params,
+                    &mut scratch,
                 );
+                scratch.reset();
             }
         }
     }
@@ -194,6 +215,27 @@ pub(crate) fn flash_d32(
         Layout::contiguous(shape),
         DType::F32,
     )
+}
+
+struct FlashScratch {
+    row_max: Vec<f32>,
+    row_sum: Vec<f32>,
+    scores: Vec<f32>,
+}
+
+impl FlashScratch {
+    fn with_seq(seq_q: usize) -> Self {
+        Self {
+            row_max: vec![f32::NEG_INFINITY; seq_q],
+            row_sum: vec![0.0f32; seq_q],
+            scores: vec![0.0f32; seq_q * TILE],
+        }
+    }
+
+    fn reset(&mut self) {
+        self.row_max.fill(f32::NEG_INFINITY);
+        self.row_sum.fill(0.0);
+    }
 }
 
 struct HeadParams {
@@ -245,13 +287,24 @@ fn run_heads_rayon(
         .enumerate()
         .for_each(|(chunk_idx, out_chunk)| {
             let start = chunk_idx * chunk_heads;
+            let mut scratch = FlashScratch::with_seq(params.seq_q);
             for (local, out_head) in out_chunk.chunks_mut(o_head_stride).enumerate() {
                 let idx = start + local;
                 let b = idx / heads;
                 let h = idx % heads;
                 one_head(
-                    b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, params,
+                    b,
+                    h,
+                    q_data,
+                    k_data,
+                    v_data,
+                    out_head,
+                    mask_data,
+                    bias_data,
+                    params,
+                    &mut scratch,
                 );
+                scratch.reset();
             }
         });
 }
@@ -266,6 +319,7 @@ fn one_head(
     mask_data: Option<&[u8]>,
     bias_data: Option<&[f32]>,
     p: &HeadParams,
+    scratch: &mut FlashScratch,
 ) {
     let kv_h = h / p.q_per_kv;
     let q_off = b * p.q_batch_stride + h * p.q_head_stride;
@@ -282,6 +336,7 @@ fn one_head(
         mask_data.map(|m| &m[mask_off..mask_off + p.mask_tile_len]),
         bias_data.map(|bias| &bias[bias_off..bias_off + p.bias_tile_len]),
         p,
+        scratch,
     );
 }
 
@@ -310,6 +365,7 @@ fn flash_head_d32(
     mask: Option<&[u8]>,
     bias: Option<&[f32]>,
     p: &HeadParams,
+    scratch: &mut FlashScratch,
 ) {
     #[cfg(all(target_arch = "x86_64", feature = "std"))]
     enable_ftz_daz();
@@ -319,17 +375,23 @@ fn flash_head_d32(
     let scale = p.scale;
     let causal_offset = p.causal_offset;
 
-    let mut row_max = vec![f32::NEG_INFINITY; seq_q];
-    let mut row_sum = vec![0.0f32; seq_q];
-    let mut scores = vec![0.0f32; seq_q * TILE];
+    let row_max = &mut scratch.row_max;
+    let row_sum = &mut scratch.row_sum;
+    let scores = &mut scratch.scores;
     output.fill(0.0);
+
+    // e5 bias is `[B,1,1,S]` (`q_step == 0`): add it once in QK instead of
+    // a scalar sweep over every query row.
+    let fuse_bias = bias.is_some() && p.bias_q_step == 0;
+    let qk_bias = if fuse_bias { bias } else { None };
+    let row_bias = if fuse_bias { None } else { bias };
 
     let num_tiles = seq_kv.div_ceil(TILE);
     for tile_idx in 0..num_tiles {
         let kv_start = tile_idx * TILE;
         let tile_kv = (seq_kv - kv_start).min(TILE);
 
-        qk_tile(q, k, kv_start, tile_kv, seq_q, scale, &mut scores);
+        qk_tile(q, k, kv_start, tile_kv, seq_q, scale, scores, qk_bias);
 
         for qi in 0..seq_q {
             let row = &mut scores[qi * TILE..qi * TILE + tile_kv];
@@ -338,7 +400,7 @@ fn flash_head_d32(
                 qi,
                 kv_start,
                 mask,
-                bias,
+                row_bias,
                 causal_offset,
                 p.mask_q_step,
                 p.bias_q_step,
@@ -413,6 +475,11 @@ fn apply_mask_bias_causal(
 }
 
 fn max_slice(row: &[f32]) -> f32 {
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    if row.len() == TILE && avx512f_available() {
+        // SAFETY: avx512f checked; `row` is TILE f32s.
+        return unsafe { max_slice_avx512_64(row) };
+    }
     let mut m = f32::NEG_INFINITY;
     for &v in row {
         if v > m {
@@ -420,6 +487,19 @@ fn max_slice(row: &[f32]) -> f32 {
         }
     }
     m
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn max_slice_avx512_64(row: &[f32]) -> f32 {
+    use core::arch::x86_64::*;
+    unsafe {
+        let p = row.as_ptr();
+        let m = _mm512_max_ps(_mm512_loadu_ps(p), _mm512_loadu_ps(p.add(16)));
+        let m = _mm512_max_ps(m, _mm512_loadu_ps(p.add(32)));
+        let m = _mm512_max_ps(m, _mm512_loadu_ps(p.add(48)));
+        _mm512_reduce_max_ps(m)
+    }
 }
 
 fn exp_sub_inplace(row: &mut [f32], max: f32) -> f32 {
@@ -467,16 +547,17 @@ fn qk_tile(
     seq_q: usize,
     scale: f32,
     scores: &mut [f32],
+    bias: Option<&[f32]>,
 ) {
     #[cfg(all(target_arch = "x86_64", feature = "std"))]
     if avx512f_available() {
         // SAFETY: avx512f checked.
         unsafe {
-            qk_tile_avx512(q, k, kv_start, tile_kv, seq_q, scale, scores);
+            qk_tile_avx512(q, k, kv_start, tile_kv, seq_q, scale, scores, bias);
         }
         return;
     }
-    qk_tile_scalar(q, k, kv_start, tile_kv, seq_q, scale, scores);
+    qk_tile_scalar(q, k, kv_start, tile_kv, seq_q, scale, scores, bias);
 }
 
 fn qk_tile_scalar(
@@ -487,6 +568,7 @@ fn qk_tile_scalar(
     seq_q: usize,
     scale: f32,
     scores: &mut [f32],
+    bias: Option<&[f32]>,
 ) {
     for qi in 0..seq_q {
         let qrow = &q[qi * D..qi * D + D];
@@ -498,6 +580,11 @@ fn qk_tile_scalar(
                 acc += qrow[d] * krow[d];
             }
             dest[ki] = acc * scale;
+        }
+        if let Some(b) = bias {
+            for ki in 0..tile_kv {
+                dest[ki] += b[kv_start + ki];
+            }
         }
     }
 }
@@ -544,6 +631,7 @@ unsafe fn qk_tile_avx512(
     seq_q: usize,
     scale: f32,
     scores: &mut [f32],
+    bias: Option<&[f32]>,
 ) {
     use core::arch::x86_64::*;
 
@@ -558,6 +646,26 @@ unsafe fn qk_tile_avx512(
         }
 
         let vscale = _mm512_set1_ps(scale);
+        let (b0, b1, b2, b3) = match bias {
+            Some(b) if tile_kv == TILE => {
+                let bp = b.as_ptr().add(kv_start);
+                (
+                    _mm512_loadu_ps(bp),
+                    _mm512_loadu_ps(bp.add(16)),
+                    _mm512_loadu_ps(bp.add(32)),
+                    _mm512_loadu_ps(bp.add(48)),
+                )
+            }
+            _ => (
+                _mm512_setzero_ps(),
+                _mm512_setzero_ps(),
+                _mm512_setzero_ps(),
+                _mm512_setzero_ps(),
+            ),
+        };
+        let add_bias_full = bias.is_some() && tile_kv == TILE;
+        let add_bias_tail = bias.filter(|_| tile_kv != TILE);
+
         for qi in 0..seq_q {
             let qrow = q.as_ptr().add(qi * D);
             let mut acc0 = _mm512_setzero_ps();
@@ -576,6 +684,12 @@ unsafe fn qk_tile_avx512(
             acc1 = _mm512_mul_ps(acc1, vscale);
             acc2 = _mm512_mul_ps(acc2, vscale);
             acc3 = _mm512_mul_ps(acc3, vscale);
+            if add_bias_full {
+                acc0 = _mm512_add_ps(acc0, b0);
+                acc1 = _mm512_add_ps(acc1, b1);
+                acc2 = _mm512_add_ps(acc2, b2);
+                acc3 = _mm512_add_ps(acc3, b3);
+            }
 
             let dest = scores.as_mut_ptr().add(qi * TILE);
             if tile_kv == TILE {
@@ -589,6 +703,11 @@ unsafe fn qk_tile_avx512(
                 _mm512_storeu_ps(tmp.as_mut_ptr().add(16), acc1);
                 _mm512_storeu_ps(tmp.as_mut_ptr().add(32), acc2);
                 _mm512_storeu_ps(tmp.as_mut_ptr().add(48), acc3);
+                if let Some(b) = add_bias_tail {
+                    for ki in 0..tile_kv {
+                        tmp[ki] += b[kv_start + ki];
+                    }
+                }
                 core::ptr::copy_nonoverlapping(tmp.as_ptr(), dest, tile_kv);
             }
         }
@@ -715,7 +834,11 @@ mod tests {
         dot / (na.sqrt() * nb.sqrt()).max(1e-12)
     }
 
-    fn make_e5_like(batch: usize, heads: usize, seq: usize) -> (FlexTensor, FlexTensor, FlexTensor) {
+    fn make_e5_like(
+        batch: usize,
+        heads: usize,
+        seq: usize,
+    ) -> (FlexTensor, FlexTensor, FlexTensor) {
         let n = batch * heads * seq * D;
         let q = flex_f32(
             (0..n).map(|i| ((i % 97) as f32) * 0.02 - 0.7).collect(),
@@ -793,7 +916,9 @@ mod tests {
         let seq = 100;
         let (q, k, v) = make_e5_like(1, 1, seq);
         let bias = flex_f32(
-            (0..seq).map(|i| if i < 10 { -1.0e4 } else { 0.0 }).collect(),
+            (0..seq)
+                .map(|i| if i < 10 { -1.0e4 } else { 0.0 })
+                .collect(),
             &[1, 1, 1, seq],
         );
         let d32 = flash_d32(
