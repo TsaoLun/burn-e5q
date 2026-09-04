@@ -473,8 +473,22 @@ VNNI QK + 物化 `[S,S]`：flash 205 → **280 ms**，所以 `attention_flash` �
 > 日期：2026-09-04。同一台 4 核 Xeon。
 > 栈：`vendor/burn-flash-d32` `219fe61`（叠在 AMX 上）。
 > 实现：`notes/flex-flash-d32.md`。
+> 两个进程分开跑。分母是本机 Rust ort 3.5 / 1099 / 53.8，不是 Mac Python 4.3 / 201。
 
 长序列 D=32 走 AVX-512 QK / softmax / PV；`[1,1,1,S]` 不再展开成 `[H,S,S]`。
-C-lite 仍不挂钩。单测 23/23，隔离 12×512：d32 2.4 ms/层 vs gemm-flash 3.6 ms/层。
+C-lite 仍不挂钩。packed `[7,512]` 必须开 FTZ+DAZ，否则 denormal ~19 s。
 
-整网对拍（`compare_ort` / `breakdown`，对本机 Rust ort 3.5 / 1099 / 53.8）写在下面，测完再填。
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+
+| 场景 | AMX + gemm flash | **D=32** | Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 13.2 | **13.9** | **3.5** | **4.0×** |
+| packed 7 条 `embed_passages` | 3829 | **2928** | **1099** | **2.7×** |
+| 512 `forward_raw` | 414 | **350** | **53.8** | **6.5×** |
+| 512 `embed_passages` | 873 | **804** | 53.8 | 含 ~451 ms SP |
+
+隔离 flash ×12：**208 → 129 ms**。`forward_raw` **414 → 350**（−64 ms）。
+`mem_stress -- 5 2048`：4×512 **3511 ms**，RSS **213 / 232 MB**。
+
+到 2×（512 ~108 ms）还差 ~240 ms。大头变成 fused GELU `erff`（~82）和整层融合。
+不要再挂钩 C-lite，不要再调 TILE。

@@ -18,14 +18,21 @@ AMX 之后 512 `forward_raw` **414 ms / 7.7×** 本机 Rust ort 53.8 ms。
 3. PV 用两路 zmm 累加（和 `attention_int8` 的 D=32 一样）
 
 算法仍是 flash（不物化 `[S,S]`）。短序列 / 别的 D / softcap 仍走 `gemm::gemm`。
-`(batch × heads)` 的 rayon 按 CPU 数切块。每个 worker 开 MXCSR FTZ+DAZ：
-packed `[7,512]`（6 行短句 pad）否则会在 denormal QK/PV 上耗到 ~19 s。
 
 ### 2. `[1,1,1,S]` mask/bias 不再展开成 `[H,S,S]`
 
 e5 的 attention bias 是 `[B,1,1,S]`。旧 helper 因为 `seq_q` 是 1 就
 `expand` 成 `[1,12,512,512]`（每层 12 MiB）。现在 `seq_kv` 对齐时只留一行，
 `q_step = 0`。只在 `seq_kv` 自己要广播时才 expand。
+
+### 3. packed batch 的两个坑（都踩过，都修了）
+
+- **96-way rayon**：`[8,12,512]` 一 head 一任务，4 核 L2 被踩烂。按
+  `num_cpus` 切块，B=8 隔离 flash 回到 **8.1×** B=1。
+- **denormal**：compare_ort 把 6 条短句和 1 条 512 打成 `[7,512]`，pad
+  位在 QK/PV 里出 denormal。没开 MXCSR FTZ+DAZ 时 **~19 s**；
+  `mem_stress` 全 512 实 token 的 `[8,512]` 只有 ~2 s 模型时间。每个
+  worker 用 `stmxcsr` / `ldmxcsr` 打开 FTZ+DAZ。
 
 ## 单测（`cargo test -p burn-flex --release --lib attention`）
 
@@ -36,11 +43,25 @@ e5 的 attention bias 是 `[B,1,1,S]`。旧 helper 因为 `seq_q` 是 1 就
 - `d32_exp_tracks_libm`（相对误差 < 2e-5）
 - `test_flash_bias_broadcast_seq_q`（`[1,1,1,S]` vs 展开）
 - 隔离 12×512：d32 **2.4 ms/层** vs gemm-flash **3.6 ms/层**（×12 ≈ 29 vs 43）
+- 隔离 8×12×512：d32 **19.6 ms（8.1×）**
 
-## 对拍
+## 对拍（本机 4 核 Xeon，flex release）
 
-见 `notes/poc-results.md`。读数用 `forward_raw` vs 本机 Rust ort 3.5 / 1099 / 53.8。
+| 口径 | AMX + gemm flash | **D=32 flash** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 13.2 | **13.9** | 3.5 | **4.0×** |
+| packed 7 条 `embed_passages` | 3829 | **2928** | 1099 | **2.7×** |
+| 512 `forward_raw` | 414 | **350** | 53.8 | **6.5×** |
+| 隔离 flash ×12 | 208 | **129** | — | −79 ms |
+
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+`mem_stress -- 5 2048`：4×512 **3511 ms**，RSS **213 / 232 MB**。
+
+512 还差 ~240 ms 才到 2×（~108 ms）。下一刀仍是 GELU `erff`（隔离 ~82）
+和整层融合，不是再调 TILE / 再挂钩 C-lite。
 
 ## 不要做
 
 不要再挂钩 C-lite。不要再调 TILE。不要用 A&S 换默认 erf。
+不要在 4 核上对 96 个 head 各开一个 AVX-512 任务。
+不要忘了 FTZ：只拿全 512 实 token 的 `mem_stress` 当 packed 会漏掉 denormal。
