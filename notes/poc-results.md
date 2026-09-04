@@ -985,4 +985,81 @@ mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1
 erf 均匀区间提前返回 + `gelu_ptr` 双 zmm；flash 4 行 softmax 交错 + 8×8 AVX K 转置。
 不改 TILE。多项式仍是 musl/fdlibm。
 
-对拍数字待写入。
+mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1 仍中）。
+
+| 场景 | FFN fuse | **GELU/flash ILP** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 2.5 | **2.7** | **2.4** | **1.1×** |
+| packed batch `embed_passages` | 1398 | **1504** | **1040** | **1.4×** |
+| 512 `forward_raw` | 106.1 | **102.0** | **39.2** | **2.6×** |
+| 512 `embed_passages` | 593 | **670** | 39.2 | 含 ~562 ms SP |
+| 4×512 `mem_stress` | 2286 | **2343** | **355** | **6.6×** |
+
+`compare_ort` 512 **102.0**；breakdown 校准 **95.7**。相对 FFN 刀大约 −4 ms。
+隔离 flash ×12 **41 → 34.5**。独立 GELU 微基准 0.72 ms，但生成图 FFN1 已走融合 dequant，端到端 GELU 行几乎不动。
+
+`mem_stress` RSS **234 / 257 MB**。
+
+---
+
+# 本机再对 Rust ort（GELU/flash ILP 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-flash-gelu-ilp` `a10b2c0`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 ids。512 **39.2**，packed **1040**，4×512 中位 **355**。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **2.7 ms** | **2.4 ms** | **1.1×** | 只有模型 |
+| 16 tok `embed_passages` | 6.9 ms | 2.4 ms | 2.9× | burn 含 4.0 ms SP |
+| packed batch | 1504 ms | **1040 ms** | 1.4× | burn 含 SP |
+| 512 `forward_raw` | **102.0 ms** | **39.2 ms** | **2.6×** | 只有模型 |
+| 512 `embed_passages` | 670 ms | 39.2 ms | 17.1× | burn 含 ~562 ms SP |
+| 4×512 `mem_stress` | 2343 ms | **355 ms** | **6.6×** | burn 含 SP；ort dummy ids |
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **370** | **5926** | **409** | **6549** |
+| packed batch | 5.3 | 398 | 6.7 | 570 |
+| 512 模型 | **9.8** | **5020** | **25.5** | **13073** |
+| 4×512 | 1.7 | 874 | 11.3 | 5770 |
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9952** | **0.9968** |
+| min cos | 0.9903 | 0.9956 |
+| ranking top-3 | 1/2 | — |
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn GELU/flash ILP | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.3 / 3.5 | 7.2 / 7.2 |
+| 模型加载后 | **87.7 / 97.6** | 155 / 235 |
+| 4×512 稳态 / HWM | **234 / 257** | **195 / 349** |
+| compare 全流程 | 246 / 288 | 195 / 349 |
+
+两边都进 512 MB。
+
+## 512 模型里还剩什么（breakdown / ~96–102 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **34.5** | **~36%** |
+| MMI 72（隔离） | 47.6 | ~47–50% |
+| fused GELU ×12（隔离，未走融合 dequant） | 18.5 | ~18% |
+| MMI dequant ×72（隔离 split） | 6.3 | ~6% |
+| fused LN ×25 | **1.4** | ~1% |
+| DQL ×48 | 4.8 | ~5% |
+
+flash 隔离掉了约 6.5 ms（41→34.5），端到端大约 −4 ms。
+独立 GELU 微基准很快，但 FFN1 已经融合，对端到端几乎没贡献。
+
+下一刀再砍 MMI（FFN1 26 ms 是单块最大头）。
+不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。

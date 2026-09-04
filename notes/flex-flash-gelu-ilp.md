@@ -38,5 +38,22 @@ breakdown：flash ×12 **41 ms（~39%）**，隔离 fused GELU ×12 **19 ms**。
 
 ## 对拍（本机 4 核 Xeon，flex release；进程分开跑）
 
-待 `compare_ort` / `breakdown` / `mem_stress -- 5 2048` / `ort-mem -- -- 5 2048`。
-不要用 Mac Python 4.3 / 201。不要再调 TILE / 再挂钩 C-lite。
+`compare_ort` 主表仍印 Mac Python 4.3 / 1412 / 201。分母用本轮单独
+`ort-mem`（arena off）：短 **2.4** / packed **1040** / 512 **39.2**。
+
+| 口径 | FFN fuse | **这一刀** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 2.5 | **2.7** | 2.4 | **1.1×** |
+| packed batch `embed_passages` | 1398 | **1504** | 1040 | **1.4×**（burn 含 SP） |
+| 512 `forward_raw` | 106.1 | **102.0** | 39.2 | **2.6×** |
+| 4×512 `mem_stress` | 2286 | **2343** | 355 | **6.6×**（burn 含 SP） |
+
+mean cos **0.9952**（min **0.9903**）。ranking 1/2（第二条 top-1 仍中，2/3 互换）。
+`compare_ort` 512 **102.0**；breakdown 校准 **95.7**。相对 FFN 刀大约 −4 ms。
+隔离 flash ×12 **41 → 34.5**；隔离 fused GELU ×12 仍是 **18.5**（生成图 FFN1 走融合 dequant，不走独立 GELU）。
+
+`mem_stress -- 5 2048`：五轮 2337–2514，中位 **2343**。RSS **234 / 257 MB**。
+Rust ort 同预算 **195 / 349 MB**，4×512 中位 **355**。
+
+端到端没掉隔离里那种 0.9 ms/层。flash 在整网里仍是缓存墙；MMI 72 仍是 **47.6 ms**。
+不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。下一刀再砍 MMI。

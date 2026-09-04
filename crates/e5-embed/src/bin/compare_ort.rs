@@ -383,8 +383,8 @@ fn main() -> anyhow::Result<()> {
     // arena off, pre-encoded ids, session.run + mean-pool. Not the Mac
     // Python numbers in ref_data.json (4.3 / 1412 / 201).
     const RUST_ORT_SHORT_MS: f64 = 2.4;
-    const RUST_ORT_PACKED_MS: f64 = 923.4;
-    const RUST_ORT_512_MS: f64 = 39.3;
+    const RUST_ORT_PACKED_MS: f64 = 1040.0;
+    const RUST_ORT_512_MS: f64 = 39.2;
     println!("\n=== vs this-machine Rust ort (ort-mem, arena off) ===");
     println!(
         "  short model:   forward_raw {fwd_short:.1} / {RUST_ORT_SHORT_MS:.1} = {:.1}×  (embed_passages {burn_single:.1} = {:.1}×, includes SP)",
