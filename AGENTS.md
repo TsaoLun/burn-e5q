@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-gelu-ln` | `68153cc97a63b4b3c91dbee64f3a747268ada525` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-int8-flash-amx` | `21dba0c3eed02fca6b0d57402d57bf34ff86dbb3` |
+| `burn`, `burn-store` | this repo `vendor/burn-flash-d32` | `a69b3a539330924b0a520a7c7e630f03cb269fa8` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -65,7 +65,10 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 8. **AMX int8 GEMM** — aligned u8×i8 MMI uses `tdpbusd` via stable `asm!`.
    VNNI-QK flash was measured slower than tiled f32 and is not hooked
    (`vendor/burn-int8-flash-amx` `21dba0c`).
-9. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+9. **D=32 AVX-512 flash** — long f32 heads with `D=32` use a tiled AVX-512
+   QK / softmax / PV kernel; `[1,1,1,S]` masks no longer expand to `[H,S,S]`
+   (`vendor/burn-flash-d32` `a69b3a5`).
+10. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 

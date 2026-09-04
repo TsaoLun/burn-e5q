@@ -465,3 +465,16 @@ VNNI QK + 物化 `[S,S]`：flash 205 → **280 ms**，所以 `attention_flash` �
 | compare 全流程 | 236 / 335 | 196 / 350 |
 
 两边都进 512 MB。加载更轻的是 burn；4×512 HWM 也是 burn 更低（275 vs 350）。稳态 RSS burn 大约 +16 MB。
+
+---
+
+# D=32 AVX-512 flash
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-flash-d32` `a69b3a5`（叠在 AMX 上）。
+> 实现：`notes/flex-flash-d32.md`。
+
+长序列 D=32 走 AVX-512 QK / softmax / PV；`[1,1,1,S]` 不再展开成 `[H,S,S]`。
+C-lite 仍不挂钩。单测 23/23，隔离 12×512：d32 2.4 ms/层 vs gemm-flash 3.6 ms/层。
+
+整网对拍（`compare_ort` / `breakdown`，对本机 Rust ort 3.5 / 1099 / 53.8）写在下面，测完再填。

@@ -192,7 +192,7 @@ fn main() -> anyhow::Result<()> {
     println!("\nHow to read:");
     println!("  compare_ort / mem_stress 512 includes sentencepiece; Rust ort 54 ms is session.run only");
     println!("  MMI + flash + GELU should sum to ~forward_raw if the model is explained");
-    println!("  对齐 MMI 走 AMX；flash 仍是 f32（VNNI QK 比 tiled f32 慢，未挂钩）");
+    println!("  对齐 MMI 走 AMX；512 flash 走 D=32 AVX-512（C-lite 仍不挂钩）");
     Ok(())
 }
 
