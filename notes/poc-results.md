@@ -876,5 +876,20 @@ mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1
 | DQL ×48 | 4.8 | ~5% |
 | dequant | 6.5 | ~6% |
 
-下一刀：整层 FFN 融合，或再砍 flash。
+下一刀整层 FFN 融合已做（见下节）。
 不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
+
+---
+
+# 整层 FFN 反量化融合
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-fuse-ffn` `5437737` + `vendor/burn-onnx-fuse-ffn` `b3353d1`
+> （叠在 AVX-512 LN 上）。
+> 实现：`notes/flex-fuse-ffn.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+`Cast(i32→f32) → Mul(scale) → Add(bias) [→ Gelu]` 收成一趟 AVX-512。
+不融 residual。不为 DQL 重算两遍 GELU。
+
+对拍数字待本轮 `compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 补。
