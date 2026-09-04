@@ -67,7 +67,7 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
    (`vendor/burn-int8-flash-amx` `21dba0c`).
 9. **D=32 AVX-512 flash** — long f32 heads with `D=32` use a tiled AVX-512
    QK / softmax / PV kernel; `[1,1,1,S]` masks no longer expand to `[H,S,S]`
-   (`vendor/burn-flash-d32` `a69b3a5`).
+   (`vendor/burn-flash-d32` `92b43c5`).
 10. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).

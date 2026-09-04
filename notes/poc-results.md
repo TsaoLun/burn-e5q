@@ -471,7 +471,7 @@ VNNI QK + 物化 `[S,S]`：flash 205 → **280 ms**，所以 `attention_flash` �
 # D=32 AVX-512 flash
 
 > 日期：2026-09-04。同一台 4 核 Xeon。
-> 栈：`vendor/burn-flash-d32` `92b43c5`（叠在 AMX 上）。
+> 栈：`vendor/burn-flash-d32` `219fe61`（叠在 AMX 上）。
 > 实现：`notes/flex-flash-d32.md`。
 
 长序列 D=32 走 AVX-512 QK / softmax / PV；`[1,1,1,S]` 不再展开成 `[H,S,S]`。

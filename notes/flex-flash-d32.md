@@ -1,6 +1,6 @@
 # D=32 AVX-512 flash + 不再展开 `[1,1,1,S]`
 
-> 2026-09-04。改动在 `vendor/burn-flash-d32`（`92b43c5`），叠在 AMX 上。
+> 2026-09-04。改动在 `vendor/burn-flash-d32`（`219fe61`），叠在 AMX 上。
 > 对拍数字见 `notes/poc-results.md`「D=32 flash」。
 > 不挂钩 C-lite。不改 TILE。
 
@@ -18,6 +18,7 @@ AMX 之后 512 `forward_raw` **414 ms / 7.7×** 本机 Rust ort 53.8 ms。
 3. PV 用两路 zmm 累加（和 `attention_int8` 的 D=32 一样）
 
 算法仍是 flash（不物化 `[S,S]`）。短序列 / 别的 D / softcap 仍走 `gemm::gemm`。
+`(batch × heads)` 的 rayon 按 CPU 数切块（packed `[8,12,512]` 是 96 个 head；一 head 一任务会把 packed 从 3.8 s 打到 19 s）。
 
 ### 2. `[1,1,1,S]` mask/bias 不再展开成 `[H,S,S]`
 
