@@ -5,9 +5,12 @@
 //! scores (~208 ms, half of `forward_raw`). This kernel keeps the same tiled
 //! online-softmax algorithm (TILE=64, no `[S,S]` materialization) but:
 //!
-//! 1. QK: transpose each K-tile to `[32, 64]` and FMA along the KV axis
+//! 1. QK: transpose each K-tile to `[32, 64]` once, then FMA along the KV axis
 //! 2. Softmax: AVX-512 max / Cephes `exp` / sum on full 64-wide tiles
 //! 3. PV: two-register D=32 accumulate (same idea as `attention_int8`)
+//! 4. Q-block (BR=16): scores stay in L1; K transpose is hoisted per KV tile
+//!
+//! TILE is still 64 (KV / Bc). BR is the query block (Br), not a TILE change.
 //!
 //! Gated to long f32 MHA/GQA with `head_dim == val_dim == 32` and no softcap.
 //! Short-seq flash unit tests stay on the bit-close gemm path.
@@ -23,6 +26,8 @@ use crate::{FlexTensor, Layout};
 
 const D: usize = 32;
 const TILE: usize = 64;
+/// Query block (FlashAttention Br). TILE is still the KV tile (Bc).
+const BR: usize = 16;
 const MIN_SEQ: usize = 64;
 
 pub(crate) fn should_use(
@@ -228,7 +233,7 @@ impl FlashScratch {
         Self {
             row_max: vec![f32::NEG_INFINITY; seq_q],
             row_sum: vec![0.0f32; seq_q],
-            scores: vec![0.0f32; seq_q * TILE],
+            scores: vec![0.0f32; BR * TILE],
         }
     }
 
@@ -386,51 +391,79 @@ fn flash_head_d32(
     let qk_bias = if fuse_bias { bias } else { None };
     let row_bias = if fuse_bias { None } else { bias };
 
+    let mut k_t = [0.0f32; D * TILE];
     let num_tiles = seq_kv.div_ceil(TILE);
     for tile_idx in 0..num_tiles {
         let kv_start = tile_idx * TILE;
         let tile_kv = (seq_kv - kv_start).min(TILE);
+        transpose_k_tile(k, kv_start, tile_kv, &mut k_t);
 
-        qk_tile(q, k, kv_start, tile_kv, seq_q, scale, scores, qk_bias);
-
-        for qi in 0..seq_q {
-            let row = &mut scores[qi * TILE..qi * TILE + tile_kv];
-            apply_mask_bias_causal(
-                row,
-                qi,
+        // Br=16: scores are BR×TILE (4 KiB) and stay in L1. TILE (Bc) is
+        // still 64. Walking all 512 queries against one K-tile used to
+        // write a 128 KiB score panel before softmax/PV reread it.
+        let mut q0 = 0;
+        while q0 < seq_q {
+            let bq = (seq_q - q0).min(BR);
+            let score_block = &mut scores[..bq * TILE];
+            qk_block(
+                &q[q0 * D..(q0 + bq) * D],
+                &k_t,
                 kv_start,
-                mask,
-                row_bias,
-                causal_offset,
-                p.mask_q_step,
-                p.bias_q_step,
+                tile_kv,
+                bq,
+                scale,
+                score_block,
+                qk_bias,
             );
 
-            let tile_max = max_slice(row);
-            if tile_max == f32::NEG_INFINITY {
-                row.fill(0.0);
-                continue;
+            for qi in 0..bq {
+                let gqi = q0 + qi;
+                let row = &mut score_block[qi * TILE..qi * TILE + tile_kv];
+                apply_mask_bias_causal(
+                    row,
+                    gqi,
+                    kv_start,
+                    mask,
+                    row_bias,
+                    causal_offset,
+                    p.mask_q_step,
+                    p.bias_q_step,
+                );
+
+                let tile_max = max_slice(row);
+                if tile_max == f32::NEG_INFINITY {
+                    row.fill(0.0);
+                    continue;
+                }
+
+                let new_max = if row_max[gqi] > tile_max {
+                    row_max[gqi]
+                } else {
+                    tile_max
+                };
+                let tile_sum = exp_sub_inplace(row, new_max);
+                let correction = if row_max[gqi] == f32::NEG_INFINITY {
+                    0.0
+                } else {
+                    (row_max[gqi] - new_max).exp()
+                };
+
+                let out_row = &mut output[gqi * D..gqi * D + D];
+                scale_row32(out_row, correction);
+                row_sum[gqi] = row_sum[gqi] * correction + tile_sum;
+                row_max[gqi] = new_max;
             }
 
-            let new_max = if row_max[qi] > tile_max {
-                row_max[qi]
-            } else {
-                tile_max
-            };
-            let tile_sum = exp_sub_inplace(row, new_max);
-            let correction = if row_max[qi] == f32::NEG_INFINITY {
-                0.0
-            } else {
-                (row_max[qi] - new_max).exp()
-            };
-
-            let out_row = &mut output[qi * D..qi * D + D];
-            scale_row32(out_row, correction);
-            row_sum[qi] = row_sum[qi] * correction + tile_sum;
-            row_max[qi] = new_max;
+            pv_block(
+                v,
+                kv_start,
+                tile_kv,
+                bq,
+                score_block,
+                &mut output[q0 * D..(q0 + bq) * D],
+            );
+            q0 += bq;
         }
-
-        pv_tile(v, kv_start, tile_kv, seq_q, &scores, output);
     }
 
     for qi in 0..seq_q {
@@ -539,12 +572,24 @@ fn scale_row32(row: &mut [f32], scale: f32) {
     }
 }
 
-fn qk_tile(
+fn transpose_k_tile(k: &[f32], kv_start: usize, tile_kv: usize, k_t: &mut [f32; D * TILE]) {
+    if tile_kv < TILE {
+        k_t.fill(0.0);
+    }
+    for ki in 0..tile_kv {
+        let krow = &k[(kv_start + ki) * D..];
+        for d in 0..D {
+            k_t[d * TILE + ki] = krow[d];
+        }
+    }
+}
+
+fn qk_block(
     q: &[f32],
-    k: &[f32],
+    k_t: &[f32; D * TILE],
     kv_start: usize,
     tile_kv: usize,
-    seq_q: usize,
+    bq: usize,
     scale: f32,
     scores: &mut [f32],
     bias: Option<&[f32]>,
@@ -553,31 +598,30 @@ fn qk_tile(
     if avx512f_available() {
         // SAFETY: avx512f checked.
         unsafe {
-            qk_tile_avx512(q, k, kv_start, tile_kv, seq_q, scale, scores, bias);
+            qk_block_avx512(q, k_t, kv_start, tile_kv, bq, scale, scores, bias);
         }
         return;
     }
-    qk_tile_scalar(q, k, kv_start, tile_kv, seq_q, scale, scores, bias);
+    qk_block_scalar(q, k_t, kv_start, tile_kv, bq, scale, scores, bias);
 }
 
-fn qk_tile_scalar(
+fn qk_block_scalar(
     q: &[f32],
-    k: &[f32],
+    k_t: &[f32; D * TILE],
     kv_start: usize,
     tile_kv: usize,
-    seq_q: usize,
+    bq: usize,
     scale: f32,
     scores: &mut [f32],
     bias: Option<&[f32]>,
 ) {
-    for qi in 0..seq_q {
+    for qi in 0..bq {
         let qrow = &q[qi * D..qi * D + D];
         let dest = &mut scores[qi * TILE..qi * TILE + tile_kv];
         for ki in 0..tile_kv {
-            let krow = &k[(kv_start + ki) * D..(kv_start + ki) * D + D];
             let mut acc = 0.0f32;
             for d in 0..D {
-                acc += qrow[d] * krow[d];
+                acc += qrow[d] * k_t[d * TILE + ki];
             }
             dest[ki] = acc * scale;
         }
@@ -589,11 +633,11 @@ fn qk_tile_scalar(
     }
 }
 
-fn pv_tile(
+fn pv_block(
     v: &[f32],
     kv_start: usize,
     tile_kv: usize,
-    seq_q: usize,
+    bq: usize,
     scores: &[f32],
     output: &mut [f32],
 ) {
@@ -601,11 +645,11 @@ fn pv_tile(
     if avx512f_available() {
         // SAFETY: avx512f checked.
         unsafe {
-            pv_tile_avx512(v, kv_start, tile_kv, seq_q, scores, output);
+            pv_block_avx512(v, kv_start, tile_kv, bq, scores, output);
         }
         return;
     }
-    for qi in 0..seq_q {
+    for qi in 0..bq {
         let prow = &scores[qi * TILE..qi * TILE + tile_kv];
         let orow = &mut output[qi * D..qi * D + D];
         for ki in 0..tile_kv {
@@ -623,12 +667,12 @@ fn pv_tile(
 
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[target_feature(enable = "avx512f")]
-unsafe fn qk_tile_avx512(
+unsafe fn qk_block_avx512(
     q: &[f32],
-    k: &[f32],
+    k_t: &[f32; D * TILE],
     kv_start: usize,
     tile_kv: usize,
-    seq_q: usize,
+    bq: usize,
     scale: f32,
     scores: &mut [f32],
     bias: Option<&[f32]>,
@@ -636,15 +680,6 @@ unsafe fn qk_tile_avx512(
     use core::arch::x86_64::*;
 
     unsafe {
-        // K-tile as [D, TILE] so the inner FMA walks consecutive KV lanes.
-        let mut k_t = [0.0f32; D * TILE];
-        for ki in 0..tile_kv {
-            let krow = k.as_ptr().add((kv_start + ki) * D);
-            for d in 0..D {
-                k_t[d * TILE + ki] = *krow.add(d);
-            }
-        }
-
         let vscale = _mm512_set1_ps(scale);
         let (b0, b1, b2, b3) = match bias {
             Some(b) if tile_kv == TILE => {
@@ -666,7 +701,112 @@ unsafe fn qk_tile_avx512(
         let add_bias_full = bias.is_some() && tile_kv == TILE;
         let add_bias_tail = bias.filter(|_| tile_kv != TILE);
 
-        for qi in 0..seq_q {
+        let mut qi = 0;
+        // Four query rows share one K-tile walk (16 acc + 4 K loads).
+        while qi + 4 <= bq && tile_kv == TILE {
+            let q0 = q.as_ptr().add(qi * D);
+            let q1 = q.as_ptr().add((qi + 1) * D);
+            let q2 = q.as_ptr().add((qi + 2) * D);
+            let q3 = q.as_ptr().add((qi + 3) * D);
+            let mut a00 = _mm512_setzero_ps();
+            let mut a01 = _mm512_setzero_ps();
+            let mut a02 = _mm512_setzero_ps();
+            let mut a03 = _mm512_setzero_ps();
+            let mut a10 = _mm512_setzero_ps();
+            let mut a11 = _mm512_setzero_ps();
+            let mut a12 = _mm512_setzero_ps();
+            let mut a13 = _mm512_setzero_ps();
+            let mut a20 = _mm512_setzero_ps();
+            let mut a21 = _mm512_setzero_ps();
+            let mut a22 = _mm512_setzero_ps();
+            let mut a23 = _mm512_setzero_ps();
+            let mut a30 = _mm512_setzero_ps();
+            let mut a31 = _mm512_setzero_ps();
+            let mut a32 = _mm512_setzero_ps();
+            let mut a33 = _mm512_setzero_ps();
+            for d in 0..D {
+                let kt = k_t.as_ptr().add(d * TILE);
+                let k0 = _mm512_loadu_ps(kt);
+                let k1 = _mm512_loadu_ps(kt.add(16));
+                let k2 = _mm512_loadu_ps(kt.add(32));
+                let k3 = _mm512_loadu_ps(kt.add(48));
+                let qd0 = _mm512_set1_ps(*q0.add(d));
+                a00 = _mm512_fmadd_ps(qd0, k0, a00);
+                a01 = _mm512_fmadd_ps(qd0, k1, a01);
+                a02 = _mm512_fmadd_ps(qd0, k2, a02);
+                a03 = _mm512_fmadd_ps(qd0, k3, a03);
+                let qd1 = _mm512_set1_ps(*q1.add(d));
+                a10 = _mm512_fmadd_ps(qd1, k0, a10);
+                a11 = _mm512_fmadd_ps(qd1, k1, a11);
+                a12 = _mm512_fmadd_ps(qd1, k2, a12);
+                a13 = _mm512_fmadd_ps(qd1, k3, a13);
+                let qd2 = _mm512_set1_ps(*q2.add(d));
+                a20 = _mm512_fmadd_ps(qd2, k0, a20);
+                a21 = _mm512_fmadd_ps(qd2, k1, a21);
+                a22 = _mm512_fmadd_ps(qd2, k2, a22);
+                a23 = _mm512_fmadd_ps(qd2, k3, a23);
+                let qd3 = _mm512_set1_ps(*q3.add(d));
+                a30 = _mm512_fmadd_ps(qd3, k0, a30);
+                a31 = _mm512_fmadd_ps(qd3, k1, a31);
+                a32 = _mm512_fmadd_ps(qd3, k2, a32);
+                a33 = _mm512_fmadd_ps(qd3, k3, a33);
+            }
+            store_qk_row4(
+                scores.as_mut_ptr().add(qi * TILE),
+                a00,
+                a01,
+                a02,
+                a03,
+                vscale,
+                add_bias_full,
+                b0,
+                b1,
+                b2,
+                b3,
+            );
+            store_qk_row4(
+                scores.as_mut_ptr().add((qi + 1) * TILE),
+                a10,
+                a11,
+                a12,
+                a13,
+                vscale,
+                add_bias_full,
+                b0,
+                b1,
+                b2,
+                b3,
+            );
+            store_qk_row4(
+                scores.as_mut_ptr().add((qi + 2) * TILE),
+                a20,
+                a21,
+                a22,
+                a23,
+                vscale,
+                add_bias_full,
+                b0,
+                b1,
+                b2,
+                b3,
+            );
+            store_qk_row4(
+                scores.as_mut_ptr().add((qi + 3) * TILE),
+                a30,
+                a31,
+                a32,
+                a33,
+                vscale,
+                add_bias_full,
+                b0,
+                b1,
+                b2,
+                b3,
+            );
+            qi += 4;
+        }
+
+        while qi < bq {
             let qrow = q.as_ptr().add(qi * D);
             let mut acc0 = _mm512_setzero_ps();
             let mut acc1 = _mm512_setzero_ps();
@@ -710,39 +850,118 @@ unsafe fn qk_tile_avx512(
                 }
                 core::ptr::copy_nonoverlapping(tmp.as_ptr(), dest, tile_kv);
             }
+            qi += 1;
         }
     }
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[target_feature(enable = "avx512f")]
-unsafe fn pv_tile_avx512(
+unsafe fn store_qk_row4(
+    dest: *mut f32,
+    a0: core::arch::x86_64::__m512,
+    a1: core::arch::x86_64::__m512,
+    a2: core::arch::x86_64::__m512,
+    a3: core::arch::x86_64::__m512,
+    vscale: core::arch::x86_64::__m512,
+    add_bias: bool,
+    b0: core::arch::x86_64::__m512,
+    b1: core::arch::x86_64::__m512,
+    b2: core::arch::x86_64::__m512,
+    b3: core::arch::x86_64::__m512,
+) {
+    use core::arch::x86_64::*;
+    unsafe {
+        let mut a0 = _mm512_mul_ps(a0, vscale);
+        let mut a1 = _mm512_mul_ps(a1, vscale);
+        let mut a2 = _mm512_mul_ps(a2, vscale);
+        let mut a3 = _mm512_mul_ps(a3, vscale);
+        if add_bias {
+            a0 = _mm512_add_ps(a0, b0);
+            a1 = _mm512_add_ps(a1, b1);
+            a2 = _mm512_add_ps(a2, b2);
+            a3 = _mm512_add_ps(a3, b3);
+        }
+        _mm512_storeu_ps(dest, a0);
+        _mm512_storeu_ps(dest.add(16), a1);
+        _mm512_storeu_ps(dest.add(32), a2);
+        _mm512_storeu_ps(dest.add(48), a3);
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn pv_block_avx512(
     v: &[f32],
     kv_start: usize,
     tile_kv: usize,
-    seq_q: usize,
+    bq: usize,
     scores: &[f32],
     output: &mut [f32],
 ) {
     use core::arch::x86_64::*;
     unsafe {
-        for qi in 0..seq_q {
+        let mut qi = 0;
+        // Four query rows share each V load. No `p == 0` skip: softmax
+        // probabilities are almost never exact zero and the branch hurts.
+        while qi + 4 <= bq {
+            let p0 = scores.as_ptr().add(qi * TILE);
+            let p1 = scores.as_ptr().add((qi + 1) * TILE);
+            let p2 = scores.as_ptr().add((qi + 2) * TILE);
+            let p3 = scores.as_ptr().add((qi + 3) * TILE);
+            let o0 = output.as_mut_ptr().add(qi * D);
+            let o1 = output.as_mut_ptr().add((qi + 1) * D);
+            let o2 = output.as_mut_ptr().add((qi + 2) * D);
+            let o3 = output.as_mut_ptr().add((qi + 3) * D);
+            let mut a00 = _mm512_loadu_ps(o0);
+            let mut a01 = _mm512_loadu_ps(o0.add(16));
+            let mut a10 = _mm512_loadu_ps(o1);
+            let mut a11 = _mm512_loadu_ps(o1.add(16));
+            let mut a20 = _mm512_loadu_ps(o2);
+            let mut a21 = _mm512_loadu_ps(o2.add(16));
+            let mut a30 = _mm512_loadu_ps(o3);
+            let mut a31 = _mm512_loadu_ps(o3.add(16));
+            for ki in 0..tile_kv {
+                let vptr = v.as_ptr().add((kv_start + ki) * D);
+                let v0 = _mm512_loadu_ps(vptr);
+                let v1 = _mm512_loadu_ps(vptr.add(16));
+                let s0 = _mm512_set1_ps(*p0.add(ki));
+                a00 = _mm512_fmadd_ps(s0, v0, a00);
+                a01 = _mm512_fmadd_ps(s0, v1, a01);
+                let s1 = _mm512_set1_ps(*p1.add(ki));
+                a10 = _mm512_fmadd_ps(s1, v0, a10);
+                a11 = _mm512_fmadd_ps(s1, v1, a11);
+                let s2 = _mm512_set1_ps(*p2.add(ki));
+                a20 = _mm512_fmadd_ps(s2, v0, a20);
+                a21 = _mm512_fmadd_ps(s2, v1, a21);
+                let s3 = _mm512_set1_ps(*p3.add(ki));
+                a30 = _mm512_fmadd_ps(s3, v0, a30);
+                a31 = _mm512_fmadd_ps(s3, v1, a31);
+            }
+            _mm512_storeu_ps(o0, a00);
+            _mm512_storeu_ps(o0.add(16), a01);
+            _mm512_storeu_ps(o1, a10);
+            _mm512_storeu_ps(o1.add(16), a11);
+            _mm512_storeu_ps(o2, a20);
+            _mm512_storeu_ps(o2.add(16), a21);
+            _mm512_storeu_ps(o3, a30);
+            _mm512_storeu_ps(o3.add(16), a31);
+            qi += 4;
+        }
+        while qi < bq {
             let prow = scores.as_ptr().add(qi * TILE);
             let optr = output.as_mut_ptr().add(qi * D);
             let mut acc0 = _mm512_loadu_ps(optr);
             let mut acc1 = _mm512_loadu_ps(optr.add(16));
             for ki in 0..tile_kv {
-                let p = *prow.add(ki);
-                if p == 0.0 {
-                    continue;
-                }
-                let pv = _mm512_set1_ps(p);
+                let pv = _mm512_set1_ps(*prow.add(ki));
                 let vptr = v.as_ptr().add((kv_start + ki) * D);
                 acc0 = _mm512_fmadd_ps(pv, _mm512_loadu_ps(vptr), acc0);
                 acc1 = _mm512_fmadd_ps(pv, _mm512_loadu_ps(vptr.add(16)), acc1);
             }
             _mm512_storeu_ps(optr, acc0);
             _mm512_storeu_ps(optr.add(16), acc1);
+            qi += 1;
         }
     }
 }
