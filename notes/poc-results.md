@@ -789,5 +789,92 @@ mean cos **0.9950**（min 0.9876），ranking 2/2。
 | DQL ×48 | 4.9 | ~4% |
 | dequant | 6 | ~5% |
 
-下一刀：AVX-512 LN（D=384），或整层 FFN 融合。
+下一刀 AVX-512 LN 已做（见下节）。
+不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
+
+---
+
+# AVX-512 last-axis LayerNorm
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-simd-ln` `fbe1288`（叠在 AMX packed-B 上）。
+> 实现：`notes/flex-simd-ln.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+D=384 走 4 行 AVX-512；unique 入口原地写。
+
+mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1 仍中）。
+
+| 场景 | AMX pack | **AVX-512 LN** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 3.2 | **2.5** | **2.4** | **1.0×** |
+| packed batch `embed_passages` | 1501 | **1366** | **1096** | **1.2×** |
+| 512 `forward_raw` | 123.6 | **103.8** | **52.4** | **2.0×** |
+| 512 `embed_passages` | 604 | **591** | 52.4 | 含 ~484 ms SP |
+| 4×512 `mem_stress` | 2609 | **2444** | **458** | **5.3×** |
+
+`forward_raw` **123.6 → 103.8**（−20 ms）。隔离 LN ×25 **21.8 → 1.6 ms**。
+`mem_stress` RSS **234 / 257 MB**。
+
+---
+
+# 本机再对 Rust ort（AVX-512 LN 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-simd-ln` `fbe1288`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 ids。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **2.5 ms** | **2.4 ms** | **1.0×** | 只有模型 |
+| 16 tok `embed_passages` | 6.2 ms | 2.4 ms | 2.6× | burn 含 3.5 ms SP |
+| packed batch | 1366 ms | **1096 ms** | 1.2× | burn 含 SP |
+| 512 `forward_raw` | **103.8 ms** | **52.4 ms** | **2.0×** | 只有模型 |
+| 512 `embed_passages` | 591 ms | 52.4 ms | 11.3× | burn 含 ~484 ms SP |
+| 4×512 `mem_stress` | 2444 ms | **458 ms** | **5.3×** | dummy ids，无 SP |
+
+512 模型口径到了 **2.0×**（目标线 ~105 ms）。
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **400** | **6400** | **413** | **6602** |
+| packed batch | 5.9 | 438 | 6.4 | 541 |
+| 512 模型 | **9.6** | **4933** | **19.1** | **9770** |
+| 4×512 | 1.6 | 838 | 8.7 | 4476 |
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9952** | **0.9968** |
+| min cos | 0.9903 | 0.9956 |
+| ranking top-3 | 1/2 | — |
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn AVX-512 LN | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.1 / 3.1 | 7.3 / 7.3 |
+| 模型加载后 | **87.6 / 97.5** | 156 / 235 |
+| 4×512 稳态 / HWM | **234 / 257** | **196 / 350** |
+| compare 全流程 | 246 / 288 | 196 / 350 |
+
+两边都进 512 MB。LN 原地写没有再涨 RSS。
+
+## 512 模型里还剩什么（breakdown / ~104 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **41** | **~39%** |
+| MMI 72（隔离；整网缓存更轻） | 17–47 | ~25–35% |
+| fused GELU ×12 | 18 | ~17% |
+| fused LN ×25 | **1.6** | ~2% |
+| DQL ×48 | 4.8 | ~5% |
+| dequant | 6.5 | ~6% |
+
+下一刀：整层 FFN 融合，或再砍 flash。
 不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。

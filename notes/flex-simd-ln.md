@@ -32,5 +32,22 @@ AMX pack 之后 512 `forward_raw` **123.6 ms / 2.3×** 本机 Rust ort 53.5 ms�
 
 ## 对拍（本机 4 核 Xeon，flex release；进程分开跑）
 
-待 `compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 填。
-对外 512 用 compare_ort 的 `forward_raw`。不要用 Mac Python 4.3 / 201。
+`compare_ort` 主表仍印 Mac Python 4.3 / 1412 / 201。分母用本轮单独
+`ort-mem`（arena off）：短 **2.4** / packed **1096** / 512 **52.4**。
+
+| 口径 | AMX pack | **这一刀** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 3.2 | **2.5** | 2.4 | **1.0×** |
+| packed batch `embed_passages` | 1501 | **1366** | 1096 | **1.2×**（burn 含 SP） |
+| 512 `forward_raw` | 123.6 | **103.8** | 52.4 | **2.0×** |
+| 4×512 `mem_stress` | 2609 | **2444** | 458 | **5.3×** |
+
+mean cos **0.9952**（min **0.9903**）。ranking 1/2（第二条 top-1 仍中，2/3 互换）。
+`forward_raw` **123.6 → 103.8**（−20 ms）。隔离 fused LN ×25 **21.8 → 1.6 ms**。
+
+`mem_stress -- 5 2048`：稳态 RSS **234 / 257 MB**。Rust ort **196 / 350 MB**。
+4×512 五轮 2337–2815，中位 2444。
+
+512 已到本机 Rust ort 的 **~2×**（目标线 ~105 ms）。大头变成 flash（41）和
+MMI / GELU。不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。
+下一刀：整层 FFN 融合，或再砍 flash。
