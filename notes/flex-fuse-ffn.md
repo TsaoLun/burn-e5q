@@ -1,7 +1,7 @@
 # 整层 FFN 反量化融合（Cast×scale+bias[+GELU]）
 
 > 2026-09-04。改动在 `vendor/burn-fuse-ffn`（`5437737`）和
-> `vendor/burn-onnx-fuse-ffn`（`b3353d1`），叠在 AVX-512 LN 上。
+> `vendor/burn-onnx-fuse-ffn`（`1b776e9`），叠在 AVX-512 LN 上。
 > 对拍数字见 `notes/poc-results.md`「整层 FFN 融合」。
 > 不改 TILE。不挂钩 C-lite。不融单个 DQL。不融 residual Add。
 > 不为 DQL 重算两遍 GELU。
@@ -21,7 +21,9 @@ FFN1 12 处带 GELU；FFN2 / QKV / out 约 60 处只有 Cast→Mul→Add。
 
 1. **onnx-ir `DequantAffine`**  
    锚点 `Cast`。匹配 `Cast(int→float, 单消费者) → Mul(单消费者) → Add`。
-   若 Add 唯一消费者是 Gelu，则 `apply_gelu=true` 并替换 Gelu，否则替换 Add。
+   Add 的消费者里只要有 Gelu 就 `apply_gelu=true` 并替换 Gelu
+   （`coalesce_gelu` 留下的 erf 残节点会占着 Add，不能要求单消费者），
+   否则替换 Add。
    scale/bias 不必是常量。PHASE 4b 在 `coalesce_gelu` / `coalesce_layer_norm`
    **之后**跑，FFN1 才能看到 Gelu 节点。不融 residual（第二消费者 / 不是 last-axis affine）。
 
@@ -41,7 +43,7 @@ FFN1 12 处带 GELU；FFN2 / QKV / out 约 60 处只有 Cast→Mul→Add。
 ## 单测
 
 - flex `--release --lib -- dequant_affine`：6/6
-- onnx-ir `--lib -- coalesce_dequant`：4/4
+- onnx-ir `--lib -- coalesce_dequant`：5/5
 - burn-onnx `--lib -- dequant_affine`：2/2 codegen 快照
 
 ## 对拍（本机 4 核 Xeon，flex release；进程分开跑）

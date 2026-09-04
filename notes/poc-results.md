@@ -884,7 +884,7 @@ mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1
 # 整层 FFN 反量化融合
 
 > 日期：2026-09-04。同一台 4 核 Xeon。
-> 栈：`vendor/burn-fuse-ffn` `5437737` + `vendor/burn-onnx-fuse-ffn` `b3353d1`
+> 栈：`vendor/burn-fuse-ffn` `5437737` + `vendor/burn-onnx-fuse-ffn` `1b776e9`
 > （叠在 AVX-512 LN 上）。
 > 实现：`notes/flex-fuse-ffn.md`。
 > 两个进程分开跑。不要用 Mac Python 4.3 / 201。
