@@ -7,7 +7,10 @@
 //! - mean pooling with attention mask, then L2 normalize to 384 dims
 
 pub mod model {
-    include!(concat!(env!("OUT_DIR"), "/model/model_qint8_avx512_vnni.rs"));
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/model/model_qint8_avx512_vnni.rs"
+    ));
 }
 
 use std::path::{Path, PathBuf};
@@ -225,10 +228,7 @@ fn pad_rows(rows: &[Vec<i64>], indices: &[usize], pad_id: i64) -> BatchEncoding 
 
 /// Mean pooling with attention mask (E5 / sentence-transformers convention),
 /// then L2 normalize per row.
-fn mean_pool_l2(
-    last_hidden_state: Tensor<3>,
-    attention_mask: Tensor<2, Int>,
-) -> Tensor<2> {
+fn mean_pool_l2(last_hidden_state: Tensor<3>, attention_mask: Tensor<2, Int>) -> Tensor<2> {
     let mask = attention_mask.float().unsqueeze_dim::<3>(2);
     let masked = last_hidden_state * mask.clone();
     let sum = masked.sum_dim(1);
@@ -339,7 +339,8 @@ impl E5Embedder {
         attention_mask: Tensor<2, Int>,
         token_type_ids: Tensor<2, Int>,
     ) -> Tensor<3> {
-        self.model.forward(input_ids, attention_mask, token_type_ids)
+        self.model
+            .forward(input_ids, attention_mask, token_type_ids)
     }
 
     fn forward_batch(&self, encoded: BatchEncoding) -> Vec<Vec<f32>> {
@@ -382,8 +383,61 @@ pub fn default_model_dir() -> PathBuf {
     manifest.join("models")
 }
 
+fn proc_status_kb_map(keys: &[&str]) -> Vec<Option<f64>> {
+    let mut out = vec![None; keys.len()];
+    let Ok(text) = std::fs::read_to_string("/proc/self/status") else {
+        return out;
+    };
+    for line in text.lines() {
+        for (i, key) in keys.iter().enumerate() {
+            if out[i].is_some() {
+                continue;
+            }
+            let prefix = format!("{key}:");
+            if let Some(rest) = line.strip_prefix(&prefix) {
+                out[i] = rest.split_whitespace().next().and_then(|s| s.parse().ok());
+            }
+        }
+    }
+    out
+}
+
+fn proc_status_kb(key: &str) -> Option<f64> {
+    proc_status_kb_map(&[key]).into_iter().next().flatten()
+}
+
 pub fn current_rss_mb() -> f64 {
+    if let Some(kb) = proc_status_kb("VmRSS") {
+        return kb / 1024.0;
+    }
     memory_stats::memory_stats()
         .map(|u| u.physical_mem as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0)
+}
+
+/// Linux peak RSS (`VmHWM`). `None` on other OSes or if `/proc` is missing.
+pub fn current_hwm_mb() -> Option<f64> {
+    proc_status_kb("VmHWM").map(|kb| kb / 1024.0)
+}
+
+/// `(RSS, HWM)` from a single `/proc/self/status` snapshot so the pair is consistent.
+pub fn current_rss_hwm_mb() -> (f64, Option<f64>) {
+    let vals = proc_status_kb_map(&["VmRSS", "VmHWM"]);
+    let rss = vals[0].map(|kb| kb / 1024.0).unwrap_or_else(current_rss_mb);
+    let hwm = vals[1].map(|kb| kb / 1024.0);
+    (rss, hwm)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod mem_probe_tests {
+    #[test]
+    fn hwm_is_present_and_at_least_rss() {
+        let (rss, hwm) = super::current_rss_hwm_mb();
+        let hwm = hwm.expect("VmHWM in /proc/self/status");
+        assert!(hwm > 0.0, "HWM should be positive, got {hwm}");
+        assert!(
+            hwm + 0.05 >= rss,
+            "HWM {hwm:.1} MB should be >= RSS {rss:.1} MB"
+        );
+    }
 }
