@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-fuse-ffn` | `1b776e9d99f4a461abfae0130ecb852f5c497cb2` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-fuse-ffn` | `543773721838f95984798a638cdf3a447177d166` |
+| `burn`, `burn-store` | this repo `vendor/burn-flash-gelu-ilp` | `a10b2c021adae3c64924d1c1717cb8abccdb3933` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -87,7 +87,11 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 15. **fused FFN dequant** — `Cast(i32→f32) → Mul(scale) → Add(bias) [→ Gelu]`
     coalesces to `DequantAffine`; flex is one AVX-512 pass
     (`vendor/burn-onnx-fuse-ffn` `1b776e9` + `vendor/burn-fuse-ffn` `5437737`).
-16. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+16. **AVX-512 GELU/flash ILP** — erf skips unused piecewise rationals on a
+    uniform zmm; `gelu_ptr` is 2-wide; D=32 flash interleaves 4 softmax
+    rows and uses an 8×8 AVX K-tile transpose. TILE stays 64
+    (`vendor/burn-flash-gelu-ilp` `a10b2c0`).
+17. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 

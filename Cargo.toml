@@ -16,12 +16,12 @@ license = "MIT OR Apache-2.0"
 #
 # | snapshot | branch |
 # |---|---|
-# | burn / burn-store | `vendor/burn-fuse-ffn` |
+# | burn / burn-store | `vendor/burn-flash-gelu-ilp` |
 # | burn-onnx / onnx-ir | `vendor/burn-onnx-fuse-ffn` |
 # | cubek | `vendor/cubek-add-i8-gemm` |
 # | cubecl (host TM) | `vendor/cubecl-host-native-jit` |
-burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "543773721838f95984798a638cdf3a447177d166" }
-burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "543773721838f95984798a638cdf3a447177d166", features = ["std"] }
+burn = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "a10b2c021adae3c64924d1c1717cb8abccdb3933" }
+burn-store = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "a10b2c021adae3c64924d1c1717cb8abccdb3933", features = ["std"] }
 
 burn-onnx = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "1b776e9d99f4a461abfae0130ecb852f5c497cb2" }
 onnx-ir = { git = "https://github.com/TsaoLun/burn-e5q", default-features = false, rev = "1b776e9d99f4a461abfae0130ecb852f5c497cb2" }

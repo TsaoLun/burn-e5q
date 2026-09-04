@@ -972,3 +972,17 @@ mean cos **0.9952**（min 0.9903）。ranking 1/2（第二条 2/3 互换，top-1
 
 下一刀再砍 flash，或让 FFN1 MMI 打中 packed-B 缓存。
 不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。
+
+---
+
+# AVX-512 GELU / flash ILP
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-flash-gelu-ilp` `a10b2c0`（叠在 FFN 融合上）。
+> 实现：`notes/flex-flash-gelu-ilp.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+erf 均匀区间提前返回 + `gelu_ptr` 双 zmm；flash 4 行 softmax 交错 + 8×8 AVX K 转置。
+不改 TILE。多项式仍是 musl/fdlibm。
+
+对拍数字待写入。
