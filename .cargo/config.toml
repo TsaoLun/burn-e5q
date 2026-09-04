@@ -1,0 +1,8 @@
+# This PoC machine (and the intended e5 host) has AVX-512-VNNI. Without
+# `target-cpu=native`, `cargo build --release` is only SSE2 and LLVM will not
+# emit `vpdpbusd` / AVX-512 even when the flex kernel asks for it via
+# `#[target_feature]`. Runtime dispatch still checks `avx512vnni` before
+# entering that kernel, so a binary built here just won't run the VNNI path
+# on a machine that lacks the feature.
+[build]
+rustflags = ["-C", "target-cpu=native"]
