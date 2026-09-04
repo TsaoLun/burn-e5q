@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-gelu-ln` | `68153cc97a63b4b3c91dbee64f3a747268ada525` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-flash-qblock` | `4d580bcef2b6b7a4fbd6558ad9f85a24c6f3f27b` |
+| `burn`, `burn-store` | this repo `vendor/burn-amx-pack` | `2a05a8424fe6b1b333be76d2919eeeb8eabe04ff` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -77,7 +77,11 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 12. **Q-block D=32 flash** — TILE stays 64; queries are blocked by 16
     so scores stay in L1. K-tile is transposed once; QK/PV walk four
     query rows per K/V load (`vendor/burn-flash-qblock` `4d580bc`).
-13. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+13. **AMX packed-B cache** — i8 weights keep a process-lifetime AMX B
+    layout + column sums; pack is SSE2, zp/sums are AVX-512. `tdpbusd`
+    is serialized so concurrent MMI cannot clobber XSTATE
+    (`vendor/burn-amx-pack` `2a05a84`).
+14. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 
