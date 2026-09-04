@@ -130,6 +130,10 @@ pub(crate) struct BroadcastMaskBias {
     pub(crate) tensor: FlexTensor,
     pub(crate) batch_step: usize,
     pub(crate) head_step: usize,
+    /// 0 when `seq_q` is broadcast (`[B,H,1,S]` / `[1,1,1,S]`), else `seq_kv`.
+    pub(crate) q_step: usize,
+    /// Length of the per-(batch, head) slice: `seq_kv` if `q_step == 0`, else `seq_q * seq_kv`.
+    pub(crate) tile_len: usize,
 }
 
 /// Prepare an attention mask or bias for the inner loop, accepting ONNX Attention-23
@@ -161,26 +165,31 @@ pub(crate) fn broadcast_attn_mask_bias(
         );
     }
 
-    let tile_len = target[2] * target[3];
+    let full_tile = target[2] * target[3];
 
-    // Broadcast on seq_q or seq_kv: the source's trailing tile has fewer elements
-    // than `tile_len`, so per-pair slice access would under-read. Materialize via
-    // expand + to_contiguous in that case.
-    if src[2] != target[2] || src[3] != target[3] {
+    // seq_kv broadcast is rare and would need a gather in the inner loop.
+    // Expand only then. seq_q broadcast (`[B,H,1,S]`, e5's `[1,1,1,S]` mask)
+    // is the common ONNX pattern: keep one row and set `q_step = 0` instead of
+    // writing a `[H,S,S]` clone (12 MiB per layer at 512).
+    if src[3] != target[3] {
         let expanded = crate::ops::expand::expand(tensor, burn_std::Shape::new(target));
         return BroadcastMaskBias {
             tensor: expanded.to_contiguous(),
-            batch_step: target[1] * tile_len,
-            head_step: tile_len,
+            batch_step: target[1] * full_tile,
+            head_step: full_tile,
+            q_step: target[3],
+            tile_len: full_tile,
         };
     }
 
-    // Trailing dims match the target. Keep the source at its own shape (size
-    // `src[0] * src[1] * tile_len`) and zero-out the step for any leading dim of 1.
+    let src_tile = src[2] * src[3];
+    let q_step = if src[2] == 1 { 0 } else { src[3] };
     BroadcastMaskBias {
         tensor: tensor.to_contiguous(),
-        batch_step: if src[0] == 1 { 0 } else { src[1] * tile_len },
-        head_step: if src[1] == 1 { 0 } else { tile_len },
+        batch_step: if src[0] == 1 { 0 } else { src[1] * src_tile },
+        head_step: if src[1] == 1 { 0 } else { src_tile },
+        q_step,
+        tile_len: src_tile,
     }
 }
 
@@ -193,10 +202,28 @@ pub fn attention_flash(
     attn_bias: Option<FlexTensor>,
     options: AttentionModuleOptions,
 ) -> FlexTensor {
-    // Route C-lite (VNNI QK, `attention_int8`) was measured on e5 512 and
-    // lost to tiled f32 flash (~280 ms vs ~205 ms): DQL + [S,S] + K=32
-    // VNNI is slower than the gemm crate. Kernel stays for tests; hook it
-    // only when QK+PV are both integer and tiled.
+    // e5 512 is D=32. The gemm-crate tiles (K=32) plus scalar exp are the
+    // remaining 208 ms. AVX-512 QK/softmax/PV keeps tiling and does not
+    // materialize `[S,S]`. C-lite (VNNI QK + full scores) was slower and
+    // stays unhooked.
+    if crate::ops::attention_d32::should_use(&query, &key, &value, &options) {
+        return crate::ops::attention_d32::flash_d32(
+            query, key, value, mask, attn_bias, options,
+        );
+    }
+    attention_flash_gemm(query, key, value, mask, attn_bias, options)
+}
+
+/// Generic tiled flash via `gemm::gemm`. Public to the crate so the D=32
+/// kernel can be compared against this path in tests.
+pub(crate) fn attention_flash_gemm(
+    query: FlexTensor,
+    key: FlexTensor,
+    value: FlexTensor,
+    mask: Option<FlexTensor>,
+    attn_bias: Option<FlexTensor>,
+    options: AttentionModuleOptions,
+) -> FlexTensor {
     dispatch_attention_dtype!(query, key, value, mask, attn_bias, options, attention_impl)
 }
 
@@ -322,14 +349,14 @@ where
     let v_data: &[T] = value.storage();
     let mask_data: Option<&[u8]> = mask_bcast.as_ref().map(|b| b.tensor.bytes());
     let bias_data: Option<&[T]> = bias_bcast.as_ref().map(|b| b.tensor.storage());
-    let (mask_batch_step, mask_head_step) = mask_bcast
+    let (mask_batch_step, mask_head_step, mask_q_step, mask_tile_len) = mask_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
-    let (bias_batch_step, bias_head_step) = bias_bcast
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
+    let (bias_batch_step, bias_head_step, bias_q_step, bias_tile_len) = bias_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
 
     let mut output = vec![T::zero(); batch * heads * seq_q * val_dim];
 
@@ -341,7 +368,6 @@ where
     let v_head_stride = seq_kv * val_dim;
     let v_batch_stride = kv_heads * v_head_stride;
     let o_head_stride = seq_q * val_dim;
-    let mask_tile_len = seq_q * seq_kv;
 
     let params = AttentionParams {
         scale,
@@ -364,9 +390,12 @@ where
         o_head_stride,
         mask_batch_step,
         mask_head_step,
+        mask_q_step,
+        mask_tile_len,
         bias_batch_step,
         bias_head_step,
-        mask_tile_len,
+        bias_q_step,
+        bias_tile_len,
     };
 
     // e5 is 12 heads; running them serially leaves 3 of 4 cores idle.
@@ -488,9 +517,12 @@ struct HeadStrides {
     o_head_stride: usize,
     mask_batch_step: usize,
     mask_head_step: usize,
+    mask_q_step: usize,
+    mask_tile_len: usize,
     bias_batch_step: usize,
     bias_head_step: usize,
-    mask_tile_len: usize,
+    bias_q_step: usize,
+    bias_tile_len: usize,
 }
 
 fn flash_one_head<T: FlashGemm>(
@@ -518,9 +550,11 @@ fn flash_one_head<T: FlashGemm>(
         &v_data[v_off..v_off + s.v_head_stride],
         out_head,
         mask_data.map(|m| &m[mask_off..mask_off + s.mask_tile_len]),
-        bias_data.map(|b| &b[bias_off..bias_off + s.mask_tile_len]),
+        bias_data.map(|b| &b[bias_off..bias_off + s.bias_tile_len]),
         params,
         scratch,
+        s.mask_q_step,
+        s.bias_q_step,
     );
 }
 
@@ -604,6 +638,8 @@ fn flash_attention_head<T: FlashGemm>(
     bias: Option<&[T]>,
     p: &AttentionParams<T>,
     scratch: &mut ScratchBuffers<T>,
+    mask_q_step: usize,
+    bias_q_step: usize,
 ) {
     debug_assert_eq!(q.len(), p.seq_q * p.head_dim);
     debug_assert_eq!(k.len(), p.seq_kv * p.head_dim);
@@ -677,7 +713,7 @@ fn flash_attention_head<T: FlashGemm>(
                 }
 
                 if let Some(m) = mask
-                    && m[qi * seq_kv + kv_idx] != 0
+                    && m[qi * mask_q_step + kv_idx] != 0
                 {
                     val = neg_inf;
                 }
@@ -689,7 +725,7 @@ fn flash_attention_head<T: FlashGemm>(
                 }
 
                 if let Some(b) = bias {
-                    val += b[qi * seq_kv + kv_idx];
+                    val += b[qi * bias_q_step + kv_idx];
                 }
 
                 *score = val;
@@ -880,14 +916,14 @@ where
     let v_data: &[T] = value.storage();
     let mask_data: Option<&[u8]> = mask_bcast.as_ref().map(|b| b.tensor.bytes());
     let bias_data: Option<&[T]> = bias_bcast.as_ref().map(|b| b.tensor.storage());
-    let (mask_batch_step, mask_head_step) = mask_bcast
+    let (mask_batch_step, mask_head_step, mask_q_step, mask_tile_len) = mask_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
-    let (bias_batch_step, bias_head_step) = bias_bcast
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
+    let (bias_batch_step, bias_head_step, bias_q_step, bias_tile_len) = bias_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
 
     let mut output = vec![T::zero(); batch * heads * seq_q * val_dim];
     let mut scores = vec![T::zero(); seq_q * seq_kv];
@@ -900,7 +936,6 @@ where
     let v_batch_stride = kv_heads * v_head_stride;
     let o_head_stride = seq_q * val_dim;
     let o_batch_stride = heads * o_head_stride;
-    let mask_tile_len = seq_q * seq_kv;
 
     let params = AttentionParams {
         scale,
@@ -932,8 +967,10 @@ where
                 &params,
                 (
                     mask_data.map(|m| &m[mask_off..mask_off + mask_tile_len]),
-                    bias_data.map(|b| &b[bias_off..bias_off + mask_tile_len]),
+                    bias_data.map(|b| &b[bias_off..bias_off + bias_tile_len]),
                 ),
+                mask_q_step,
+                bias_q_step,
             );
         }
     }
@@ -959,6 +996,8 @@ fn naive_attention_head<T: FlashGemm>(
     scores: &mut [T],
     p: &AttentionParams<T>,
     mask_bias: (Option<&[u8]>, Option<&[T]>),
+    mask_q_step: usize,
+    bias_q_step: usize,
 ) {
     let (mask, bias) = mask_bias;
     let neg_inf = T::neg_infinity();
@@ -1005,7 +1044,7 @@ fn naive_attention_head<T: FlashGemm>(
             }
 
             if let Some(m) = mask
-                && m[qi * seq_kv + ki] != 0
+                && m[qi * mask_q_step + ki] != 0
             {
                 val = neg_inf;
             }
@@ -1017,7 +1056,7 @@ fn naive_attention_head<T: FlashGemm>(
             }
 
             if let Some(b) = bias {
-                val += b[qi * seq_kv + ki];
+                val += b[qi * bias_q_step + ki];
             }
 
             *s = val;
@@ -1317,6 +1356,49 @@ mod tests {
         let bcast: &[f32] = out_bcast.storage();
         let full: &[f32] = out_full.storage();
         assert_attention_outputs_close(bcast, full, "flash bias[1,1,sq,skv]");
+    }
+
+    #[test]
+    fn test_flash_bias_broadcast_seq_q() {
+        // e5 mask is `[B,1,1,S]`. Expanding that to `[B,H,S,S]` is 12 MiB at
+        // 512 tokens; the helper must keep one row (`q_step = 0`).
+        let batch = 1;
+        let heads = 4;
+        let seq_q = 8;
+        let seq_kv = 8;
+        let head_dim = 4;
+        let n = batch * heads * seq_q * head_dim;
+        let q = flex_f32(
+            (0..n).map(|i| (i as f32 * 0.03).sin()).collect(),
+            &[batch, heads, seq_q, head_dim],
+        );
+        let k = flex_f32(
+            (0..n).map(|i| (i as f32 * 0.05).cos()).collect(),
+            &[batch, heads, seq_q, head_dim],
+        );
+        let v = q.clone();
+        let row: Vec<f32> = (0..seq_kv).map(|i| if i < 2 { -1.0e4 } else { 0.0 }).collect();
+        let bias_row = flex_f32(row.clone(), &[1, 1, 1, seq_kv]);
+        let mut full = Vec::with_capacity(batch * heads * seq_q * seq_kv);
+        for _ in 0..batch * heads * seq_q {
+            full.extend_from_slice(&row);
+        }
+        let bias_full = flex_f32(full, &[batch, heads, seq_q, seq_kv]);
+
+        let out_row = super::attention_flash(
+            q.clone(),
+            k.clone(),
+            v.clone(),
+            None,
+            Some(bias_row),
+            Default::default(),
+        );
+        let out_full = super::attention_flash(q, k, v, None, Some(bias_full), Default::default());
+        assert_attention_outputs_close(
+            out_row.storage(),
+            out_full.storage(),
+            "flash bias[1,1,1,S]",
+        );
     }
 
     #[test]

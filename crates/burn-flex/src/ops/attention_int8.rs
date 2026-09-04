@@ -62,6 +62,7 @@ pub(crate) fn should_use(
     int_gemm::vnni_available()
 }
 
+#[allow(dead_code)] // see should_use
 pub(crate) fn flash_int8(
     query: FlexTensor,
     key: FlexTensor,
@@ -107,14 +108,14 @@ pub(crate) fn flash_int8(
     let v_data: &[f32] = value.storage();
     let mask_data: Option<&[u8]> = mask_bcast.as_ref().map(|b| b.tensor.bytes());
     let bias_data: Option<&[f32]> = bias_bcast.as_ref().map(|b| b.tensor.storage());
-    let (mask_batch_step, mask_head_step) = mask_bcast
+    let (mask_batch_step, mask_head_step, mask_q_step, mask_tile_len) = mask_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
-    let (bias_batch_step, bias_head_step) = bias_bcast
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
+    let (bias_batch_step, bias_head_step, bias_q_step, bias_tile_len) = bias_bcast
         .as_ref()
-        .map(|b| (b.batch_step, b.head_step))
-        .unwrap_or((0, 0));
+        .map(|b| (b.batch_step, b.head_step, b.q_step, b.tile_len))
+        .unwrap_or((0, 0, seq_kv, 0));
 
     let q_head_stride = seq_q * head_dim;
     let q_batch_stride = heads * q_head_stride;
@@ -123,7 +124,6 @@ pub(crate) fn flash_int8(
     let v_head_stride = seq_kv * val_dim;
     let v_batch_stride = kv_heads * v_head_stride;
     let o_head_stride = seq_q * val_dim;
-    let mask_tile_len = seq_q * seq_kv;
 
     let mut output = vec![0.0f32; batch * heads * seq_q * val_dim];
 
@@ -143,9 +143,12 @@ pub(crate) fn flash_int8(
         v_head_stride,
         mask_batch_step,
         mask_head_step,
+        mask_q_step,
+        mask_tile_len,
         bias_batch_step,
         bias_head_step,
-        mask_tile_len,
+        bias_q_step,
+        bias_tile_len,
     };
 
     #[cfg(feature = "rayon")]
@@ -211,9 +214,12 @@ struct HeadParams {
     v_head_stride: usize,
     mask_batch_step: usize,
     mask_head_step: usize,
+    mask_q_step: usize,
+    mask_tile_len: usize,
     bias_batch_step: usize,
     bias_head_step: usize,
-    mask_tile_len: usize,
+    bias_q_step: usize,
+    bias_tile_len: usize,
 }
 
 fn one_head(
@@ -240,7 +246,7 @@ fn one_head(
         &v_data[v_off..v_off + p.v_head_stride],
         out_head,
         mask_data.map(|m| &m[mask_off..mask_off + p.mask_tile_len]),
-        bias_data.map(|bias| &bias[bias_off..bias_off + p.mask_tile_len]),
+        bias_data.map(|bias| &bias[bias_off..bias_off + p.bias_tile_len]),
         p,
     );
 }
@@ -284,6 +290,8 @@ fn int8_qk_head(
         p.causal_offset,
         seq_q,
         seq_kv,
+        p.mask_q_step,
+        p.bias_q_step,
     );
 
     output.fill(0.0);
@@ -310,6 +318,8 @@ fn dequant_scale_mask_softmax(
     causal_offset: Option<isize>,
     seq_q: usize,
     seq_kv: usize,
+    mask_q_step: usize,
+    bias_q_step: usize,
 ) {
     let neg_inf = f32::NEG_INFINITY;
     for qi in 0..seq_q {
@@ -319,7 +329,7 @@ fn dequant_scale_mask_softmax(
         for ki in 0..seq_kv {
             let mut val = in_row[ki] as f32 * score_scale;
             if let Some(m) = mask
-                && m[qi * seq_kv + ki] != 0
+                && m[qi * mask_q_step + ki] != 0
             {
                 val = neg_inf;
             }
@@ -329,7 +339,7 @@ fn dequant_scale_mask_softmax(
                 val = neg_inf;
             }
             if let Some(b) = bias {
-                val += b[qi * seq_kv + ki];
+                val += b[qi * bias_q_step + ki];
             }
             out_row[ki] = val;
             if val > row_max {
