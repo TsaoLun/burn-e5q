@@ -329,6 +329,7 @@ impl_node_codegen_dispatch! {
     Mean,
     Gemm,
     Linear,
+    DequantAffine,
     MatMulInteger,
     DynamicQuantizeLinear,
     DequantizeLinear,

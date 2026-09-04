@@ -6,8 +6,10 @@
 //! ## Current passes (in execution order per iteration)
 //!
 //! 1. **Attention coalescing** - decomposed SDPA pattern -> single Attention node
-//! 1b. **GELU / LayerNorm coalescing** - expanded erf-GELU and last-axis LN
-//!     subgraphs -> `Gelu` / `LayerNormalization` so flex can use fused kernels
+//! 1b. **GELU / LayerNorm / DequantAffine coalescing** - expanded erf-GELU
+//!     and last-axis LN subgraphs -> `Gelu` / `LayerNormalization`;
+//!     `Cast(int→float)→Mul→Add[→Gelu]` -> `DequantAffine` so flex can
+//!     use fused kernels
 //! 2. **Permute-reshape detection** - Shape+Gather+Unsqueeze+Concat+Reshape -> Transpose
 //! 3. **Constant shape propagation** - Shape->Gather and Shape->Slice elimination,
 //!    and Size of a Shape-typed value
@@ -37,6 +39,7 @@
 //! involved and dynamic dims cannot invalidate it.
 
 mod coalesce_attention;
+mod coalesce_dequant_affine;
 mod coalesce_gelu;
 mod coalesce_layer_norm;
 pub(crate) mod constant_fold;
@@ -55,6 +58,7 @@ use crate::{
 };
 
 use coalesce_attention::coalesce_attention;
+use coalesce_dequant_affine::coalesce_dequant_affine;
 use coalesce_gelu::coalesce_gelu;
 use coalesce_layer_norm::coalesce_layer_norm;
 use constant_fold::fold_constants;
@@ -91,6 +95,8 @@ pub(crate) fn simplify_graph(
         // rewrites the scalar Unsqueeze/Pow nodes the matchers walk.
         nodes = coalesce_gelu(nodes);
         nodes = coalesce_layer_norm(nodes);
+        // After Gelu exists so FFN1 matches Cast→Mul→Add→Gelu.
+        nodes = coalesce_dequant_affine(nodes);
 
         // Structural pattern detection (must run before constant folding, which
         // replaces Gather/Slice nodes with Constants and destroys the patterns)

@@ -377,6 +377,8 @@ define_node_enum! {
 
     // LINEAR & SPECIAL LAYERS
     Linear => linear::LinearNode,
+    /// Burn-specific: `Cast(i32→f32) → Mul(scale) → Add(bias) [→ Gelu]`.
+    DequantAffine => dequant_affine::DequantAffineNode,
     Attention => attention::AttentionNode,
 
     // CONSTANT GENERATION

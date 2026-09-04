@@ -453,6 +453,10 @@ impl ProcessorRegistry {
             NodeType::Linear,
             Box::new(crate::node::linear::LinearProcessor),
         );
+        registry.register(
+            NodeType::DequantAffine,
+            Box::new(crate::node::dequant_affine::DequantAffineProcessor),
+        );
         registry.register(NodeType::Gemm, Box::new(crate::node::gemm::GemmProcessor));
         registry.register(
             NodeType::Einsum,
