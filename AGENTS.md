@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-gelu-ln` | `68153cc97a63b4b3c91dbee64f3a747268ada525` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-simd-gelu` | `a62f53407164d9dfd390fda2bdf8c82c9469bcdc` |
+| `burn`, `burn-store` | this repo `vendor/burn-simd-dql` | `2b47a1b8405e8a61de0afa09a03351f4d4923fac` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -71,7 +71,10 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 10. **AVX-512 GELU** — contiguous f32 GELU uses musl/fdlibm `erff`
     polynomials (not A&S); large buffers still rayon
     (`vendor/burn-simd-gelu` `a62f534`).
-11. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+11. **AVX-512 DQL + flash bias QK** — DQL minmax/quantize is AVX-512
+    ties-to-even; `[B,1,1,S]` attention bias is added in the QK epilogue
+    (`vendor/burn-simd-dql` `2b47a1b`).
+12. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 
