@@ -57,8 +57,8 @@ e5 的 attention bias 是 `[B,1,1,S]`。旧 helper 因为 `seq_q` 是 1 就
 mean cos **0.9950**（min 0.9876），ranking 2/2。
 `mem_stress -- 5 2048`：4×512 **3511 ms**，RSS **213 / 232 MB**。
 
-512 还差 ~240 ms 才到 2×（~108 ms）。下一刀仍是 GELU `erff`（隔离 ~82）
-和整层融合，不是再调 TILE / 再挂钩 C-lite。
+512 还差 ~240 ms 才到 2×（~108 ms）。下一刀 GELU `erff` 已做
+（`notes/flex-gelu-simd.md`，512 → 269 ms）。不要再调 TILE / 再挂钩 C-lite。
 
 ## 不要做
 

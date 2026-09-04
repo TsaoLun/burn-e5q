@@ -492,3 +492,31 @@ mean cos **0.9950**（min 0.9876），ranking 2/2。
 
 到 2×（512 ~108 ms）还差 ~240 ms。大头变成 fused GELU `erff`（~82）和整层融合。
 不要再挂钩 C-lite，不要再调 TILE。
+
+---
+
+# AVX-512 GELU
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-simd-gelu` `a62f534`（叠在 D=32 flash 上）。
+> 实现：`notes/flex-gelu-simd.md`。
+> 两个进程分开跑。分母是本机 Rust ort 3.5 / 1099 / 53.8。
+
+连续 f32 GELU 走 musl/fdlibm `erff` 的 AVX-512 分段有理式。不是 A&S。
+unary `erf` 仍是 `libm::erff`。上一刀 codegen 融 GELU 整网没掉；这次
+in-place 和 alloc 都走 SIMD，整网吃到了。
+
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+
+| 场景 | D=32 flash | **SIMD GELU** | Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 13.9 | **10.9** | **3.5** | **3.1×** |
+| packed batch `embed_passages` | 2928 | **2401** | **1099** | **2.2×** |
+| 512 `forward_raw` | 350 | **269** | **53.8** | **5.0×** |
+| 512 `embed_passages` | 804 | **731** | 53.8 | 含 ~451 ms SP |
+
+隔离 fused GELU ×12：**83 → 17 ms**。`forward_raw` **350 → 269**（−81 ms）。
+`mem_stress -- 5 2048`：4×512 **3050 ms**，RSS **213 / 232 MB**。
+
+到 2× 还差 ~161 ms。下一刀是整层 FFN 融合或再砍 flash，不是再调 TILE /
+再挂钩 C-lite / 再用 A&S 换默认 erf。

@@ -20,6 +20,8 @@ D=32 flash 之后 512 `forward_raw` **350 ms / 6.5×** 本机 Rust ort 53.8 ms�
 3. 非连续 / 非 f32 仍走原来的 `unary_op` + `libm`
 
 不是 Abramowitz–Stegun 7.1.26。`Tensor::erf` 默认路径没动。
+上一刀 codegen 融 GELU 时隔离能省、整网几乎没动（图路径不 unique）。
+这次 in-place 和 alloc 两条都走 SIMD，整网吃到了。
 
 ## 单测（`cargo test -p burn-flex --release --lib gelu`）
 
@@ -32,6 +34,17 @@ D=32 flash 之后 512 `forward_raw` **350 ms / 6.5×** 本机 Rust ort 53.8 ms�
 
 ## 对拍（本机 4 核 Xeon，flex release）
 
-测前 revision。`compare_ort` / `breakdown` / `mem_stress` 数字随后补。
+| 口径 | D=32 flash | **SIMD GELU** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 13.9 | **10.9** | 3.5 | **3.1×** |
+| packed batch `embed_passages` | 2928 | **2401** | 1099 | **2.2×** |
+| 512 `forward_raw` | 350 | **269** | 53.8 | **5.0×** |
+| 512 `embed_passages` | 804 | **731** | 53.8 | 含 ~451 ms SP |
 
-不要再用 A&S 换默认 erf。不要再调 flash TILE / 再挂钩 C-lite。
+mean cos **0.9950**（min **0.9876**），ranking 2/2。
+隔离 fused GELU ×12：**83 → 17 ms**。`forward_raw` **350 → 269**（−81 ms）。
+`mem_stress -- 5 2048`：4×512 **3050 ms**，RSS **213 / 232 MB**。
+
+512 还差 ~161 ms 才到 2×（~108 ms）。大头变成 D=32 flash（隔离 132 / ~50%）
+和整层 FFN 融合（MMI + GELU + DQL + LN 少扫几趟 `[1,512,1536]`）。
+不要再调 TILE / 再挂钩 C-lite / 再用 A&S 换默认 erf。
