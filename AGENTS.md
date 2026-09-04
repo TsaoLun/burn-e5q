@@ -22,7 +22,7 @@ DynamicQuantizeLinear or the e5-embed pipeline unless a regression appears.
 |---|---|---|
 | `burn-onnx`, `onnx-ir` | this repo `vendor/burn-onnx-coalesce-gelu-ln` | `68153cc97a63b4b3c91dbee64f3a747268ada525` |
 | `cubek` | this repo `vendor/cubek-add-i8-gemm` via `[patch]` of `tracel-ai/cubek` | `29485715f433fd26863dcaa5c8cc80f2a98f6183` |
-| `burn`, `burn-store` | this repo `vendor/burn-amx-pack` | `2a05a8424fe6b1b333be76d2919eeeb8eabe04ff` |
+| `burn`, `burn-store` | this repo `vendor/burn-simd-ln` | `fbe1288ab29670e6f2bfffd34a5b03b4b25a0926` |
 | `cubecl` (transitive) | this repo `vendor/cubecl-host-native-jit` | `a62bcd86aba5b9e530be6abd4d47810d3177d8d0` |
 
 The TsaoLun forks denied this agent's `git push` (403). Each working tree is
@@ -81,7 +81,10 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
     layout + column sums; pack is SSE2, zp/sums are AVX-512. `tdpbusd`
     is serialized so concurrent MMI cannot clobber XSTATE
     (`vendor/burn-amx-pack` `2a05a84`).
-14. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
+14. **AVX-512 LayerNorm** — last-axis f32 LN with `D%16==0` (e5 D=384)
+    uses a 4-row AVX-512 kernel; unique inputs are in-place
+    (`vendor/burn-simd-ln` `fbe1288`).
+15. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).
 
