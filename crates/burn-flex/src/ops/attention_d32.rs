@@ -158,17 +158,10 @@ pub(crate) fn flash_d32(
 
     #[cfg(feature = "rayon")]
     if batch * heads > 1 {
-        use rayon::prelude::*;
-        output
-            .par_chunks_mut(o_head_stride)
-            .enumerate()
-            .for_each(|(idx, out_head)| {
-                let b = idx / heads;
-                let h = idx % heads;
-                one_head(
-                    b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, &params,
-                );
-            });
+        run_heads_rayon(
+            batch, heads, o_head_stride, q_data, k_data, v_data, &mut output, mask_data,
+            bias_data, &params,
+        );
     } else {
         one_head(
             0, 0, q_data, k_data, v_data, &mut output, mask_data, bias_data, &params,
@@ -223,6 +216,44 @@ struct HeadParams {
     bias_head_step: usize,
     bias_q_step: usize,
     bias_tile_len: usize,
+}
+
+/// Flattened `(batch, head)` work, but only ~one task per CPU.
+///
+/// A packed e5 forward is `[8, 12, 512, 32]` → 96 heads. One rayon task
+/// per head on a 4-core box thrashes L2 and blew the packed batch from
+/// ~3.8 s to ~19 s. Group heads so each worker reuses scratch in L1/L2.
+#[cfg(feature = "rayon")]
+fn run_heads_rayon(
+    batch: usize,
+    heads: usize,
+    o_head_stride: usize,
+    q_data: &[f32],
+    k_data: &[f32],
+    v_data: &[f32],
+    output: &mut [f32],
+    mask_data: Option<&[u8]>,
+    bias_data: Option<&[f32]>,
+    params: &HeadParams,
+) {
+    use rayon::prelude::*;
+    let n = batch * heads;
+    let threads = rayon::current_num_threads().max(1);
+    let chunk_heads = n.div_ceil(threads).max(1);
+    output
+        .par_chunks_mut(chunk_heads * o_head_stride)
+        .enumerate()
+        .for_each(|(chunk_idx, out_chunk)| {
+            let start = chunk_idx * chunk_heads;
+            for (local, out_head) in out_chunk.chunks_mut(o_head_stride).enumerate() {
+                let idx = start + local;
+                let b = idx / heads;
+                let h = idx % heads;
+                one_head(
+                    b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, params,
+                );
+            }
+        });
 }
 
 fn one_head(
@@ -878,6 +909,31 @@ mod tests {
         assert!(
             d32_ms < gemm_ms * 0.85,
             "d32 {d32_ms:.1} ms should beat gemm-flash {gemm_ms:.1} ms by >15%"
+        );
+
+        // Packed compare_ort is `[8, 12, 512, 32]`. 96 one-head rayon tasks
+        // were ~5× slower than 8× the B=1 kernel; grain must stay near linear.
+        let (q8, k8, v8) = make_e5_like(8, 12, 512);
+        let mut d32_b8 = f64::INFINITY;
+        for _ in 0..2 {
+            d32_b8 = d32_b8.min(time_ms(&mut || {
+                let _ = flash_d32(
+                    q8.clone(),
+                    k8.clone(),
+                    v8.clone(),
+                    None,
+                    None,
+                    Default::default(),
+                );
+            }));
+        }
+        println!(
+            "e5-like 8×12h×512: d32 {d32_b8:.1} ms ({:.1}× the 1×12h kernel)",
+            d32_b8 / d32_ms.max(1e-9)
+        );
+        assert!(
+            d32_b8 < d32_ms * 16.0,
+            "B=8 d32 {d32_b8:.1} ms should stay under 16× B=1 {d32_ms:.1} ms"
         );
     }
 }

@@ -573,17 +573,26 @@ fn run_flash_heads<T: FlashGemm>(
     #[cfg(feature = "rayon")]
     if batch * heads > 1 {
         use rayon::prelude::*;
+        // One task per (batch, head) on a packed e5 `[8,12,512]` is 96
+        // workers. Cap at ~num_cpus so scratch stays hot (see attention_d32).
+        let n = batch * heads;
+        let threads = rayon::current_num_threads().max(1);
+        let chunk_heads = n.div_ceil(threads).max(1);
         output
-            .par_chunks_mut(strides.o_head_stride)
+            .par_chunks_mut(chunk_heads * strides.o_head_stride)
             .enumerate()
-            .for_each(|(idx, out_head)| {
-                let b = idx / heads;
-                let h = idx % heads;
+            .for_each(|(chunk_idx, out_chunk)| {
+                let start = chunk_idx * chunk_heads;
                 let mut scratch = ScratchBuffers::new(params.seq_q);
-                flash_one_head(
-                    b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, params, strides,
-                    &mut scratch,
-                );
+                for (local, out_head) in out_chunk.chunks_mut(strides.o_head_stride).enumerate() {
+                    let idx = start + local;
+                    let b = idx / heads;
+                    let h = idx % heads;
+                    flash_one_head(
+                        b, h, q_data, k_data, v_data, out_head, mask_data, bias_data, params,
+                        strides, &mut scratch,
+                    );
+                }
             });
         return;
     }
