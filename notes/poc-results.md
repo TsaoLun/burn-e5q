@@ -615,5 +615,92 @@ packed / `embed_passages` 吞吐被 sentencepiece 拉低，不拿来当模型基
 | DQL ×48 | **4.8** | 已不是大头 |
 | dequant | 6 | ~3% |
 
-下一刀：整层 FFN 融合（少扫 `[1,512,1536]`），或再砍 flash。
+下一刀 Q-block flash 已做（见下节）。
+
+---
+
+# Q-block D=32 flash
+
+> 日期：2026-09-04。同一台 4 核 Xeon。
+> 栈：`vendor/burn-flash-qblock` `4d580bc`（叠在 SIMD DQL 上）。
+> 实现：`notes/flex-flash-qblock.md`。
+> 两个进程分开跑。不要用 Mac Python 4.3 / 201。
+
+TILE 仍是 64。Query 按 Br=16 分块，K-tile 只转一次，QK/PV 一次走 4 行。
+C-lite 仍不挂钩。
+
+mean cos **0.9950**（min 0.9876），ranking 2/2。
+
+| 场景 | SIMD DQL | **Q-block** | Rust ort（本轮） | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 10.1 | **10.1** | **3.7** | **2.7×** |
+| packed batch `embed_passages` | 1905 | **1686** | **1168** | **1.4×** |
+| 512 `forward_raw` | 185 | **149** | **53.5** | **2.8×** |
+| 512 `embed_passages` | 718 | **628** | 53.5 | 含 ~476 ms SP |
+| 4×512 `mem_stress` | 2827 | **2938** | **498** | **5.9×** |
+
+隔离 flash ×12：**78 → 40 ms**。`forward_raw` **185 → 149**（−36 ms）。
+`mem_stress -- 5 2048`：RSS **213 / 232 MB**。4×512 墙钟没掉（B=4 噪声）。
+
+---
+
+# 本机再对 Rust ort（Q-block 之后）
+
+> 日期：2026-09-04。同一台 4 核 Xeon。**两个进程分开跑**。
+> burn：`compare_ort` / `mem_stress -- 5 2048` / `breakdown`（`vendor/burn-flash-qblock` `4d580bc`）。
+> Rust ort：`ort-mem -- -- 5 2048`，arena off，4 intra-op，预编码 ids。
+
+## 延迟（公平 = 预编码 ids / 只有模型）
+
+| 场景 | burn | **Rust ort arena off** | 倍数 | 口径 |
+|---|---:|---:|---:|---|
+| 16 tok `forward_raw` | **10.1 ms** | **3.7 ms** | **2.7×** | 只有模型 |
+| 16 tok `embed_passages` | 13.9 ms | 3.7 ms | 3.8× | burn 含 3.5 ms SP |
+| packed batch | 1686 ms | **1168 ms** | 1.4× | burn 含 SP |
+| 512 `forward_raw` | **149 ms** | **53.5 ms** | **2.8×** | 只有模型 |
+| 512 `embed_passages` | 628 ms | 53.5 ms | 11.7× | burn 含 ~476 ms SP |
+| 4×512 `mem_stress` | 2938 ms | **498 ms** | **5.9×** | dummy ids，无 SP |
+
+到 2× 按 ~54 ms → **~107 ms**，还差 ~42 ms。
+
+## 吞吐（同一组活数）
+
+| 场景 | burn q/s | burn tok/s | Rust ort q/s | Rust ort tok/s |
+|---|---:|---:|---:|---:|
+| 16 tok 模型 | **99** | **1584** | **274** | **4382** |
+| packed batch | 4.7 | 355 | 6.0 | 508 |
+| 512 模型 | **6.7** | **3436** | **18.7** | **9571** |
+| 4×512 | 1.4 | 697 | 8.0 | 4112 |
+
+## 数值
+
+| | burn vs Python ref | Rust ort vs 同一份 ref |
+|---|---:|---:|
+| mean cos | **0.9950** | **0.9967** |
+| min cos | 0.9876 | 0.9956 |
+| ranking top-3 | 2/2 | — |
+
+## 内存（整进程 VmRSS / VmHWM）
+
+| 阶段 | burn Q-block | **Rust ort arena off** |
+|---|---:|---:|
+| 启动 | 3.2 / 3.3 | 7.4 / 7.4 |
+| 模型加载后 | **87.5 / 97.4** | 155 / 235 |
+| 4×512 稳态 / HWM | **213 / 232** | **195 / 348** |
+| compare 全流程 | 221 / 258 | 195 / 348 |
+
+两边都进 512 MB。burn 加载更轻、HWM 更低；稳态 RSS 大约 +18 MB。
+
+## 512 模型里还剩什么（breakdown / ~149 ms）
+
+| 块 | ms | 约占 |
+|---|---:|---:|
+| 12× D=32 flash | **40** | **~27%** |
+| MMI 72（隔离；整网 AMX 更轻） | 21–54 | ~20–30% |
+| fused LN ×25 | 22 | ~15% |
+| fused GELU ×12 | 17 | ~11% |
+| DQL ×48 | 4.9 | ~3% |
+| dequant | 6 | ~4% |
+
+下一刀：整层 FFN 融合（少扫 `[1,512,1536]`），或再砍 LN。
 不要再调 TILE / 不要挂钩 C-lite / 不要再融单个 DQL codegen。

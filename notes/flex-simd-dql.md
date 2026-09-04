@@ -52,5 +52,6 @@ mean cos **0.9950**（min **0.9876**），ranking 2/2。
 
 `mem_stress -- 5 2048`：稳态 RSS **213 / 232 MB**。Rust ort 同预算 **195 / 348 MB**。
 
-到 2×（512 ~108–111 ms）还差 ~75 ms。大头是 flash（78 / ~42%）和 MMI
-（隔离 54，整网 AMX 更轻）。不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。
+到 2×（512 ~108–111 ms）还差 ~75 ms。下一刀 Q-block flash 已做
+（`notes/flex-flash-qblock.md`，512 → 149 ms / 2.8×）。
+不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。

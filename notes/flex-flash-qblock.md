@@ -28,6 +28,24 @@ C-lite 仍不挂钩。
 - 带 `[1,1,1,S]` bias：1.63 ms/层
 - B=8：14.2 ms（7.6×）
 
-## 对拍
+## 对拍（本机 4 核 Xeon，flex release；进程分开跑）
 
-测前 revision。`compare_ort` / `breakdown` / `mem_stress` / `ort-mem` 随后补。
+`compare_ort` 主表仍印 Mac Python 4.3 / 1412 / 201。分母用本轮单独
+`ort-mem`（arena off）：短 **3.7** / packed **1168** / 512 **53.5**。
+
+| 口径 | SIMD DQL | **这一刀** | 本机 Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok `forward_raw` | 10.1 | **10.1** | 3.7 | **2.7×** |
+| packed batch `embed_passages` | 1905 | **1686** | 1168 | **1.4×**（burn 含 SP） |
+| 512 `forward_raw` | 185 | **149** | 53.5 | **2.8×** |
+| 4×512 `mem_stress` | 2827 | **2938** | 498 | **5.9×** |
+
+mean cos **0.9950**（min **0.9876**），ranking 2/2。
+隔离 flash ×12：**78 → 40 ms**。`forward_raw` **185 → 149**（−36 ms）。
+对外用 compare_ort 的 149，不用 breakdown 的 146。
+
+`mem_stress -- 5 2048`：稳态 RSS **213 / 232 MB**。Rust ort 同预算 **195 / 348 MB**。
+4×512 墙钟几乎没掉（B=4 一次 forward，噪声大于 Br 收益）。
+
+到 2×（512 ~107 ms）还差 ~42 ms。大头变成 MMI（隔离 54）和 fused LN / GELU。
+不要再调 TILE / 再挂钩 C-lite / 再融单个 DQL codegen。
