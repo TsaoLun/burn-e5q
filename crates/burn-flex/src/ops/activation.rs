@@ -57,18 +57,18 @@ impl ActivationOps<Flex> for Flex {
     }
 
     fn gelu(tensor: FloatTensor<Flex>) -> FloatTensor<Flex> {
-        // 0.5 * x * (1 + erf(x / sqrt(2))) — same libm erf as the unary path.
-        // Large contiguous f32 (e5 FFN is [1,512,1536] = 786K) fans out with
-        // rayon; a fused GELU node is otherwise one serial erf sweep.
+        // 0.5 * x * (1 + erf(x / sqrt(2))) — same piecewise as libm erff.
+        // Contiguous f32 uses the AVX-512 musl kernel when present; large
+        // buffers (e5 FFN is [1,512,1536] = 786K) also fan out with rayon.
         use crate::ops::unary::{erf_f32, erf_f64};
         let sqrt2_f32: f32 = core::f32::consts::SQRT_2;
         let sqrt2_f64: f64 = core::f64::consts::SQRT_2;
-        #[cfg(feature = "rayon")]
-        if tensor.dtype() == DType::F32
-            && tensor.layout().is_contiguous()
-            && tensor.layout().num_elements() >= crate::ops::PARALLEL_THRESHOLD
-        {
-            return gelu_f32_par(tensor, sqrt2_f32);
+        if tensor.dtype() == DType::F32 && tensor.layout().is_contiguous() {
+            #[cfg(feature = "rayon")]
+            if tensor.layout().num_elements() >= crate::ops::PARALLEL_THRESHOLD {
+                return gelu_f32_par(tensor, sqrt2_f32);
+            }
+            return gelu_f32_contig(tensor, sqrt2_f32);
         }
         unary_op(
             tensor,
@@ -239,26 +239,43 @@ fn softmax_last(tensor: FloatTensor<Flex>) -> FloatTensor<Flex> {
     }
 }
 
+fn gelu_f32_contig(mut tensor: FlexTensor, sqrt2: f32) -> FlexTensor {
+    use crate::ops::gelu_avx512::{gelu_copy, gelu_inplace};
+
+    let n = tensor.layout().num_elements();
+    if tensor.is_unique() && tensor.layout().is_contiguous() && tensor.layout().start_offset() == 0
+    {
+        let storage: &mut [f32] = tensor.storage_mut();
+        gelu_inplace(&mut storage[..n], sqrt2);
+        return tensor;
+    }
+
+    let tensor = tensor.to_contiguous();
+    let shape = tensor.layout().shape().clone();
+    let src: &[f32] = tensor.storage();
+    let mut out = vec![0.0f32; n];
+    gelu_copy(&mut out, &src[..n], sqrt2);
+    FlexTensor::new(
+        Bytes::from_elems(out),
+        Layout::contiguous(shape),
+        DType::F32,
+    )
+}
+
 #[cfg(feature = "rayon")]
 fn gelu_f32_par(mut tensor: FlexTensor, sqrt2: f32) -> FlexTensor {
-    use crate::ops::unary::erf_f32;
+    use crate::ops::gelu_avx512::{gelu_copy, gelu_inplace};
     use rayon::prelude::*;
 
     const CHUNK: usize = 16 * 1024;
     let n = tensor.layout().num_elements();
 
-    #[inline(always)]
-    fn gelu_one(v: f32, sqrt2: f32) -> f32 {
-        0.5 * v * (1.0 + erf_f32(v / sqrt2))
-    }
-
-    if tensor.is_unique() && tensor.layout().is_contiguous() && tensor.layout().start_offset() == 0 {
+    if tensor.is_unique() && tensor.layout().is_contiguous() && tensor.layout().start_offset() == 0
+    {
         let storage: &mut [f32] = tensor.storage_mut();
-        storage[..n].par_chunks_mut(CHUNK).for_each(|chunk| {
-            for x in chunk.iter_mut() {
-                *x = gelu_one(*x, sqrt2);
-            }
-        });
+        storage[..n]
+            .par_chunks_mut(CHUNK)
+            .for_each(|chunk| gelu_inplace(chunk, sqrt2));
         return tensor;
     }
 
@@ -268,11 +285,7 @@ fn gelu_f32_par(mut tensor: FlexTensor, sqrt2: f32) -> FlexTensor {
     let mut out = vec![0.0f32; n];
     out.par_chunks_mut(CHUNK)
         .zip(src[..n].par_chunks(CHUNK))
-        .for_each(|(dst, src)| {
-            for (o, &v) in dst.iter_mut().zip(src) {
-                *o = gelu_one(v, sqrt2);
-            }
-        });
+        .for_each(|(dst, src)| gelu_copy(dst, src, sqrt2));
     FlexTensor::new(
         Bytes::from_elems(out),
         Layout::contiguous(shape),
@@ -1197,7 +1210,7 @@ mod tests {
     }
 
     // ============================================================================
-    // gelu (libm erf; large f32 uses rayon)
+    // gelu (musl/libm erf; contiguous f32 uses AVX-512 + rayon)
     // ============================================================================
 
     fn gelu_ref_f32(data: &[f32]) -> Vec<f32> {
