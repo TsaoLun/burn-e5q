@@ -407,8 +407,23 @@ flex 大 GELU 走 rayon（仍是 `libm::erff`）。
 # 整数 flash + AMX
 
 > 日期：2026-09-03。同一台 4 核 Xeon（`avx512_vnni` + `amx_int8`）。
-> 栈：`vendor/burn-int8-flash-amx` `5abc55e`（叠在融 GELU/LN 上）。
+> 栈：`vendor/burn-int8-flash-amx` `21dba0c`（叠在融 GELU/LN 上）。
 > 实现：`notes/flex-int8-flash-amx.md`。
 
-flex `attention()` 在 seq≥256 时走 VNNI QK；对齐的 u8×i8 MMI 走 AMX `tdpbusd`。
-对拍数字待 `compare_ort` / `breakdown` 写入。读数用 `forward_raw`。
+**AMX 做成了；C-lite 整数 QK 写成了但挂钩更慢，已拔掉。**
+
+对齐的 72× MMI：228 ms @ 44 GOPS → **21 ms @ 280–600 GOPS（~11×）**。
+VNNI QK + 物化 `[S,S]`：flash 205 → **280 ms**，所以 `attention_flash` 仍走 tiled f32。
+`forward_raw` **636 → 408–417 ms（7.6–7.8×** Rust ort 53.8）。mean cos **0.9950**。
+
+| 场景 | 融 GELU/LN | **AMX + f32 flash** | Rust ort | 倍数 |
+|---|---:|---:|---:|---:|
+| 16 tok | 28.6 ms | **17.0 ms** | 2.4 ms | **7.1×** |
+| packed batch | 5.60 s | **3.83 s** | 936 ms | **4.1×** |
+| 512 `forward_raw` | 636 ms | **408 ms** | 53.8 ms | **7.6×** |
+| 512 `embed_passages` | 1151 ms | **879 ms** | — | 含 SP |
+
+`mem_stress -- 5 2048`：4×512 稳态 **212 / 275 MB**，约 3.95 s/round（进 512 MB）。
+
+模型里现在最大的是 f32 flash（208 ms / 50%）和 fused GELU 的 `erff`（~83 ms）。
+到 2× 还差 ~300 ms。不要再挂钩这版 C-lite，不要再调 TILE。

@@ -62,8 +62,9 @@ Work order (details in `notes/stage-4.md` and `notes/stage-4-impl.md`):
 7. **fused GELU / LayerNorm** — coalesce the expanded erf-GELU and last-axis
    LN subgraphs; flex parallelizes large f32 `gelu` (`vendor/burn-onnx-coalesce-gelu-ln`
    `68153cc` + `vendor/burn-flex-par-gelu` `319336c`).
-8. **int8 flash + AMX GEMM** — long `attention()` does VNNI QK; aligned
-   u8×i8 MMI uses AMX `tdpbusd` (`vendor/burn-int8-flash-amx` `5abc55e`).
+8. **AMX int8 GEMM** — aligned u8×i8 MMI uses `tdpbusd` via stable `asm!`.
+   VNNI-QK flash was measured slower than tiled f32 and is not hooked
+   (`vendor/burn-int8-flash-amx` `21dba0c`).
 9. **Re-bench** — `cargo run --release -p e5-embed --bin compare_ort`
    and `mem_stress`. Target: within ~2× of the ort baseline in `ref_data.json`
    (single short ~4 ms, 512-token ~200 ms on the machine that wrote that file).

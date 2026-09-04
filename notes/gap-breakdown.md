@@ -90,14 +90,14 @@ dummy 权重显式 U8×I8，走线上同一条 VNNI。flex eager，`black_box` �
 
 ## 下一刀（按证据排序）
 
-只谈**模型** 639 → ~108 ms（2× ORT）。tokenizer 另案。
+只谈**模型**。#10 之后基线是 `forward_raw` **~410 ms / 7.6×**，不是 639。到 2× 还要 ~108 ms。tokenizer 另案。
 
 1. **先收 FFN 侧面：GELU + LN**（#9，`notes/flex-gelu-ln.md`）——codegen 做成，整网几乎没掉。  
    隔离最多 −56 ms；`forward_raw` 仍 ~636 ms。不要再在这条线上磨 erf / LN。
-2. **路线 C：int8 flash**  
-   205 ms f32 flash @ 12 GOPS。按现在 VNNI 的 44 GOPS 估 QK ≈ 25–40 ms 量级。能啃掉模型一块，**单独不够**到 2×。
-3. **MMI 本身再快**（打包、AMX、QKV 合并）  
-   228 ms @ 44 GOPS。不提速 GEMM，flash 做完也还剩 ~200 ms 量级整数乘。
+2. **路线 C：int8 flash**（#10 试过 C-lite）  
+   VNNI QK + 物化 `[S,S]` 在 e5 512 上 **更慢**（280 vs 208 ms）。完整整数 streaming 还没做。
+3. **MMI 本身再快**（#10 AMX）  
+   228 ms @ 44 GOPS → **21 ms @ 280–600 GOPS**。GEMM 不再是模型第一名。
 4. **整层 / FFN 融合（MMI + GELU + LN + DQL）**  
    这四块合计仍是大头。ORT 赢在 epilogue 融进 GEMM。
 5. **计量**  
