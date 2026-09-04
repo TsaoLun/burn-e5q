@@ -83,14 +83,24 @@ fn try_match(
         return None;
     }
 
-    if is_single_use(&add.outputs[0].name, consumer) {
-        let gelu_idx = *consumer.get(&add.outputs[0].name)?.first()?;
-        let gelu = &nodes[gelu_idx];
-        if gelu.node_type == NodeType::Gelu && gelu.inputs[0].name == add.outputs[0].name {
-            return Some((
-                gelu_idx,
-                fused_node(gelu, x, scale, bias, true, &gelu.outputs),
-            ));
+    // After coalesce_gelu the last Mul is a Gelu, but the expanded
+    // erf/div/mul leftovers still consume Add until DCE. Do not require
+    // Add to be single-use: any Gelu consumer is enough. A live second
+    // consumer of the pre-GELU value still sees the original Add.
+    if let Some(consumers) = consumer.get(&add.outputs[0].name) {
+        for &gelu_idx in consumers {
+            let gelu = &nodes[gelu_idx];
+            if gelu.node_type == NodeType::Gelu
+                && gelu
+                    .inputs
+                    .first()
+                    .is_some_and(|a| a.name == add.outputs[0].name)
+            {
+                return Some((
+                    gelu_idx,
+                    fused_node(gelu, x, scale, bias, true, &gelu.outputs),
+                ));
+            }
         }
     }
 
@@ -289,6 +299,28 @@ mod tests {
                 .iter()
                 .any(|n| n.node_type == NodeType::DequantAffine)
         );
+    }
+
+    #[test]
+    fn ffn1_gelu_matches_despite_leftover_erf_consumer() {
+        let mut nodes = e5_ffn1();
+        nodes.push(op(
+            "erf_leftover",
+            NodeType::Erf,
+            vec![tensor("xb", DType::F32, 3)],
+            tensor("dead_erf", DType::F32, 3),
+        ));
+        let result = coalesce_dequant_affine(nodes);
+        let fused = result
+            .iter()
+            .find(|n| n.node_type == NodeType::DequantAffine)
+            .expect("fused");
+        assert_eq!(fused.outputs[0].name, "y");
+        assert!(matches!(
+            fused.attrs.get("apply_gelu"),
+            Some(AttributeValue::Int64(1))
+        ));
+        assert!(result.iter().any(|n| n.name == "erf_leftover"));
     }
 
     #[test]
