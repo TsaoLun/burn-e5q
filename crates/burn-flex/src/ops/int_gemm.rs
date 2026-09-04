@@ -258,7 +258,14 @@ where
     let ta = TypeId::of::<A>();
     let tb = TypeId::of::<B>();
     if ta == TypeId::of::<u8>() && tb == TypeId::of::<i8>() {
-        return amx::gemm::<true, true>(bytemuck::cast_slice(a), bytemuck::cast_slice(b), m, n, k, zp);
+        return amx::gemm::<true, true>(
+            bytemuck::cast_slice(a),
+            bytemuck::cast_slice(b),
+            m,
+            n,
+            k,
+            zp,
+        );
     }
     if ta == TypeId::of::<u8>() && tb == TypeId::of::<u8>() {
         return amx::gemm::<true, false>(
@@ -401,6 +408,26 @@ pub(crate) fn apply_zp(
     if zp.is_none() {
         return;
     }
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    if n.is_multiple_of(16) && std::is_x86_feature_detected!("avx512f") {
+        // SAFETY: avx512f checked; `n` is 16-wide.
+        unsafe {
+            apply_zp_avx512(c, m, n, k, sum_a, sum_b, zp);
+        }
+        return;
+    }
+    apply_zp_scalar(c, m, n, k, sum_a, sum_b, zp);
+}
+
+fn apply_zp_scalar(
+    c: &mut [i32],
+    m: usize,
+    n: usize,
+    k: usize,
+    sum_a: &[i32],
+    sum_b: &[i32],
+    zp: &Zp,
+) {
     let k_i = k as i32;
     for i in 0..m {
         let za = zp.za.at(i);
@@ -414,6 +441,59 @@ pub(crate) fn apply_zp(
                 .wrapping_add(sa.wrapping_mul(zb))
                 .wrapping_sub(k_i.wrapping_mul(za).wrapping_mul(zb));
             c_row[j] = c_row[j].wrapping_sub(corr);
+        }
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn apply_zp_avx512(
+    c: &mut [i32],
+    m: usize,
+    n: usize,
+    k: usize,
+    sum_a: &[i32],
+    sum_b: &[i32],
+    zp: &Zp,
+) {
+    use core::arch::x86_64::*;
+    let k_i = k as i32;
+    let zb_scalar = match &zp.zb {
+        ZpLane::Zero => Some(0),
+        ZpLane::Scalar(v) => Some(*v),
+        ZpLane::Per(_) => None,
+    };
+    unsafe {
+        for i in 0..m {
+            let za = zp.za.at(i);
+            let sa = if sum_a.is_empty() { 0 } else { sum_a[i] };
+            let vza = _mm512_set1_epi32(za);
+            let vsa = _mm512_set1_epi32(sa);
+            let vkza = _mm512_set1_epi32(k_i.wrapping_mul(za));
+            let c_row = c.as_mut_ptr().add(i * n);
+            let mut j = 0;
+            while j < n {
+                let sb = if sum_b.is_empty() {
+                    _mm512_setzero_si512()
+                } else {
+                    _mm512_loadu_si512(sum_b.as_ptr().add(j).cast())
+                };
+                let zb = match zb_scalar {
+                    Some(v) => _mm512_set1_epi32(v),
+                    None => match &zp.zb {
+                        ZpLane::Per(v) => _mm512_loadu_si512(v.as_ptr().add(j).cast()),
+                        _ => _mm512_setzero_si512(),
+                    },
+                };
+                // corr = za*sb + sa*zb - k*za*zb  (i32 wrap)
+                let corr = _mm512_sub_epi32(
+                    _mm512_add_epi32(_mm512_mullo_epi32(vza, sb), _mm512_mullo_epi32(vsa, zb)),
+                    _mm512_mullo_epi32(vkza, zb),
+                );
+                let acc = _mm512_loadu_si512(c_row.add(j).cast());
+                _mm512_storeu_si512(c_row.add(j).cast(), _mm512_sub_epi32(acc, corr));
+                j += 16;
+            }
         }
     }
 }
@@ -467,7 +547,7 @@ fn accum_panel<A: AsAcc, B: AsAcc>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AsAcc, Zp, ZpLane, gemm, gemm_with_zp};
+    use super::{gemm, gemm_with_zp, AsAcc, Zp, ZpLane};
 
     fn naive<A: AsAcc, B: AsAcc>(a: &[A], b: &[B], m: usize, n: usize, k: usize) -> Vec<i32> {
         let mut c = vec![0i32; m * n];
@@ -603,8 +683,9 @@ mod tests {
 
     #[test]
     fn gemm_amx_aligned_u8_i8_matches_naive() {
-        // 16×16×64 is one AMX tile; 64×64×384 is an e5-like QKV panel.
-        for (m, n, k) in [(16, 16, 64), (64, 64, 384)] {
+        // 16×16×64 is one AMX tile; 64×64×384 is an e5-like QKV panel;
+        // 32×1536×384 is a short FFN1 (same N/K as 512×384×1536, fewer rows).
+        for (m, n, k) in [(16, 16, 64), (64, 64, 384), (32, 1536, 384)] {
             let a: Vec<u8> = (0..m * k).map(|i| (i * 13 + 9) as u8).collect();
             let b: Vec<i8> = (0..k * n).map(|i| ((i * 7) as i16 - 100) as i8).collect();
             let zp = Zp {
@@ -622,6 +703,81 @@ mod tests {
                 "zp {m}x{n}x{k}"
             );
         }
+    }
+
+    #[test]
+    fn gemm_amx_ffn_pack_cache_beats_first_touch() {
+        // Same i8 B pointer is reused (e5 weights). First call packs;
+        // later calls should be compute-only.
+        if super::try_amx::<u8, i8>(&[0u8; 16 * 64], &[0i8; 64 * 16], 16, 16, 64, &Zp::NONE)
+            .is_none()
+        {
+            return;
+        }
+        let m = 512;
+        let n = 1536;
+        let k = 384;
+        let a: Vec<u8> = (0..m * k).map(|i| (i * 13 + 9) as u8).collect();
+        let b: Vec<i8> = (0..k * n).map(|i| ((i * 7) as i16 - 100) as i8).collect();
+        let b2 = b.clone();
+        let zp = Zp {
+            za: ZpLane::Scalar(17),
+            zb: ZpLane::Scalar(-3),
+        };
+        let a32 = &a[..32 * k];
+        assert_eq!(
+            gemm_with_zp(a32, &b, 32, n, k, &zp),
+            naive_zp(a32, &b, 32, n, k, &zp),
+            "M=32 panel of the FFN1 B must match naive (pack+AMX)"
+        );
+        let t0 = std::time::Instant::now();
+        let first = gemm_with_zp(&a, &b, m, n, k, &zp);
+        let first_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let clone_t = std::time::Instant::now();
+        let via_clone = gemm_with_zp(&a, &b2, m, n, k, &zp);
+        let clone_ms = clone_t.elapsed().as_secs_f64() * 1e3;
+        if via_clone != first {
+            let i = via_clone
+                .iter()
+                .zip(&first)
+                .position(|(x, y)| x != y)
+                .unwrap();
+            panic!(
+                "two B allocs differ at {i} (row {} col {}): {} vs {} (AMX leftover, not cache)",
+                i / n,
+                i % n,
+                via_clone[i],
+                first[i]
+            );
+        }
+        let mut later = f64::INFINITY;
+        for _ in 0..4 {
+            let t = std::time::Instant::now();
+            let y = gemm_with_zp(&a, &b, m, n, k, &zp);
+            later = later.min(t.elapsed().as_secs_f64() * 1e3);
+            if y != first {
+                let i = y
+                    .iter()
+                    .zip(&first)
+                    .position(|(x, z)| x != z)
+                    .expect("length mismatch");
+                panic!(
+                    "cached FFN1 mismatch at {i} (row {} col {}): {} vs {}; first {first_ms:.3} clone {clone_ms:.3}",
+                    i / n,
+                    i % n,
+                    y[i],
+                    first[i]
+                );
+            }
+        }
+        let _ = std::fs::write(
+            "/tmp/amx_pack_bench.txt",
+            format!("ffn1 512×384×1536 first {first_ms:.3} later {later:.3}\n"),
+        );
+        assert!(
+            later < first_ms * 0.85 || later < 1.5,
+            "cached FFN1 {later:.2} ms should beat first-touch {first_ms:.2} ms"
+        );
     }
 
     #[test]
