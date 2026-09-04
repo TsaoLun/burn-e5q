@@ -793,6 +793,26 @@ pub trait IntTensorOps<B: Backend> {
         int_matmul_integer_algebraic::<B>(lhs, rhs, zp_lhs, zp_rhs)
     }
 
+    /// Affine dequant of an integer tensor: `y = x.f32 * scale + bias`.
+    ///
+    /// `scale` / `bias` must already be broadcast-aligned to `tensor`
+    /// (scalar scale and last-axis bias should be unsqueezed). When
+    /// `apply_gelu` is set, GELU runs in the same pass:
+    /// `y = gelu(x.f32 * scale + bias)`.
+    ///
+    /// The default implementation is `float + mul + add [+ gelu]`. Backends
+    /// with a fused kernel (flex AVX-512) should override this.
+    fn int_dequant_affine(
+        tensor: IntTensor<B>,
+        scale: FloatTensor<B>,
+        bias: FloatTensor<B>,
+        apply_gelu: bool,
+    ) -> FloatTensor<B> {
+        let x = B::int_into_float(tensor, FloatDType::F32);
+        let y = B::float_add(B::float_mul(x, scale), bias);
+        if apply_gelu { B::gelu(y) } else { y }
+    }
+
     /// Element-wise negation.
     ///
     /// # Arguments

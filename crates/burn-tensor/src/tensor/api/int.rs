@@ -216,6 +216,44 @@ impl<const D: usize> Tensor<D, Int> {
             zp_rhs.map(|t| t.primitive),
         ))
     }
+
+    /// Affine dequant: `y = self.f32 * scale + bias`.
+    ///
+    /// `scale` / `bias` must already be broadcast-aligned to rank `D`
+    /// (scalar scale and last-axis bias should be `unsqueeze`d). Backends
+    /// with a fused kernel (flex AVX-512) do this in one pass; others
+    /// expand to `float + mul + add`.
+    #[must_use]
+    pub fn dequant_affine(
+        self,
+        scale: Tensor<D, Float>,
+        bias: Tensor<D, Float>,
+    ) -> Tensor<D, Float> {
+        Tensor::new(dequant_affine_impl(
+            self.primitive,
+            scale.primitive,
+            bias.primitive,
+            false,
+        ))
+    }
+
+    /// Affine dequant then GELU: `y = gelu(self.f32 * scale + bias)`.
+    ///
+    /// Same broadcast rules as [`Self::dequant_affine`]. Flex fuses the
+    /// cast, scale, bias, and GELU into one AVX-512 sweep.
+    #[must_use]
+    pub fn dequant_affine_gelu(
+        self,
+        scale: Tensor<D, Float>,
+        bias: Tensor<D, Float>,
+    ) -> Tensor<D, Float> {
+        Tensor::new(dequant_affine_impl(
+            self.primitive,
+            scale.primitive,
+            bias.primitive,
+            true,
+        ))
+    }
 }
 
 // =========================================================================
@@ -296,5 +334,19 @@ fn matmul_integer_impl(
         rhs.into(),
         zp_lhs.map(Into::into),
         zp_rhs.map(Into::into),
+    ))
+}
+
+fn dequant_affine_impl(
+    tensor: BridgeTensor,
+    scale: BridgeTensor,
+    bias: BridgeTensor,
+    apply_gelu: bool,
+) -> BridgeTensor {
+    BridgeTensor::float(Dispatch::int_dequant_affine(
+        tensor.into(),
+        scale.into(),
+        bias.into(),
+        apply_gelu,
     ))
 }

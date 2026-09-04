@@ -672,6 +672,15 @@ impl IntTensorOps<Flex> for Flex {
         matmul::int_matmul_integer(lhs, rhs, zp_lhs, zp_rhs)
     }
 
+    fn int_dequant_affine(
+        tensor: IntTensor<Flex>,
+        scale: FloatTensor<Flex>,
+        bias: FloatTensor<Flex>,
+        apply_gelu: bool,
+    ) -> FloatTensor<Flex> {
+        crate::ops::dequant_affine::dequant_affine(tensor, scale, bias, apply_gelu)
+    }
+
     fn int_sum(tensor: IntTensor<Flex>) -> IntTensor<Flex> {
         crate::ops::reduce::sum(tensor)
     }

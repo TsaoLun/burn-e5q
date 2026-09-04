@@ -66,7 +66,7 @@ pub(crate) fn gelu_copy(dst: &mut [f32], src: &[f32], sqrt2: f32) {
 /// Per-thread: flush denormals. Padded e5 rows otherwise spend a long time
 /// in denormal `erff` / AVX-512 divides.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
-fn enable_ftz_daz() {
+pub(crate) fn enable_ftz_daz() {
     unsafe {
         let mut mxcsr: u32 = 0;
         core::arch::asm!(
@@ -97,29 +97,34 @@ unsafe fn gelu_copy_avx512(dst: &mut [f32], src: &[f32], sqrt2: f32) {
 
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 #[target_feature(enable = "avx512f")]
-unsafe fn gelu_ptr_avx512(dst: *mut f32, src: *const f32, n: usize, sqrt2: f32) {
+pub(crate) unsafe fn gelu_ps_avx512(x: core::arch::x86_64::__m512) -> core::arch::x86_64::__m512 {
     use core::arch::x86_64::*;
     unsafe {
-        let v_sqrt2 = _mm512_set1_ps(sqrt2);
-        let v_half = _mm512_set1_ps(0.5);
-        let v_one = _mm512_set1_ps(1.0);
+        let t = _mm512_div_ps(x, _mm512_set1_ps(core::f32::consts::SQRT_2));
+        let e = erf_ps_avx512(t);
+        _mm512_mul_ps(
+            _mm512_mul_ps(_mm512_set1_ps(0.5), x),
+            _mm512_add_ps(_mm512_set1_ps(1.0), e),
+        )
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+#[target_feature(enable = "avx512f")]
+unsafe fn gelu_ptr_avx512(dst: *mut f32, src: *const f32, n: usize, _sqrt2: f32) {
+    use core::arch::x86_64::*;
+    unsafe {
         let mut i = 0;
         while i + 16 <= n {
             let x = _mm512_loadu_ps(src.add(i));
-            let t = _mm512_div_ps(x, v_sqrt2);
-            let e = erf_ps_avx512(t);
-            let y = _mm512_mul_ps(_mm512_mul_ps(v_half, x), _mm512_add_ps(v_one, e));
-            _mm512_storeu_ps(dst.add(i), y);
+            _mm512_storeu_ps(dst.add(i), gelu_ps_avx512(x));
             i += 16;
         }
         if i < n {
             let rem = n - i;
             let mask = ((1u32 << rem) - 1) as u16;
             let x = _mm512_mask_loadu_ps(_mm512_setzero_ps(), mask, src.add(i));
-            let t = _mm512_div_ps(x, v_sqrt2);
-            let e = erf_ps_avx512(t);
-            let y = _mm512_mul_ps(_mm512_mul_ps(v_half, x), _mm512_add_ps(v_one, e));
-            _mm512_mask_storeu_ps(dst.add(i), mask, y);
+            _mm512_mask_storeu_ps(dst.add(i), mask, gelu_ps_avx512(x));
         }
     }
 }

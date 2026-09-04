@@ -266,6 +266,19 @@ impl IntTensorOps<Self> for Dispatch {
         )
     }
 
+    fn int_dequant_affine(
+        tensor: IntTensor<Self>,
+        scale: FloatTensor<Self>,
+        bias: FloatTensor<Self>,
+        apply_gelu: bool,
+    ) -> FloatTensor<Self> {
+        multi_op!(
+            inputs[(tensor, int), (scale, float), (bias, float)],
+            => Float,
+            B::int_dequant_affine(tensor, scale, bias, apply_gelu)
+        )
+    }
+
     fn int_sum(tensor: IntTensor<Self>) -> IntTensor<Self> {
         unary_op!(tensor, int, |tensor| B::int_sum(tensor) => Int)
     }
